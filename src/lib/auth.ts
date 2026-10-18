@@ -1,9 +1,18 @@
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile, SessionUser } from "@/lib/types";
 
-/** The signed-in user, verified through the access token claims, or null. */
+/**
+ * The signed-in user, verified through the access token claims, or null.
+ *
+ * Reading the session compares the access token's expiry with the clock inside
+ * the auth client, so it can only run at request time. `connection()` stops
+ * prerendering before that check instead of letting it fail the route, which
+ * is why every caller can stay a blocking server component.
+ */
 export async function getSessionUser(): Promise<SessionUser | null> {
+  await connection();
   const supabase = await createClient();
   const { data, error } = await supabase.auth.getClaims();
   if (error) return null;

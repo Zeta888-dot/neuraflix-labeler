@@ -23,7 +23,13 @@ Status: Phase L1 complete. Phase L2 (Conversations module) has not been started.
    bug: `claim_next` inserted a new claim row on every call, so claiming the same item again
    inflated the item's `active_claims` and could push it past `target_count`. 0002 collapses the
    duplicate rows that bug left behind, and a repeat claim now renews the caller's own row instead.
-6. Make yourself the first admin with the UPDATE statement in 0001's header comment, using your email.
+6. SQL Editor: paste all of `supabase/migrations/0003_fix_ambiguous_columns.sql` and run it once,
+   after 0002. Postgres raised `column reference "item_id" is ambiguous` from `claim_next`, because
+   a `RETURNS TABLE` output column is a PL/pgSQL variable inside the body and `item_id`, `english`,
+   `source` and `target_count` are also table columns. 0003 recreates `claim_next` with `out_*`
+   output columns and recreates `release_claim` and `submit_instruction_translation` with every
+   column reference qualified. No behaviour change; the app reads the `out_*` names.
+7. Make yourself the first admin with the UPDATE statement in 0001's header comment, using your email.
 
 ## Import English items (local)
 

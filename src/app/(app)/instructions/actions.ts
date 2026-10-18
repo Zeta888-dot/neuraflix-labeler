@@ -28,6 +28,23 @@ import { createClient } from "@/lib/supabase/server";
 
 type Db = Awaited<ReturnType<typeof createClient>>;
 
+type RpcErrorFields = {
+  message: string;
+  code?: string | null;
+  details?: string | null;
+  hint?: string | null;
+};
+
+/** Postgres error fields only: never the payload, the session or the row. */
+function logRpcError(prefix: string, error: RpcErrorFields): void {
+  console.error(prefix, {
+    message: error.message,
+    code: error.code ?? null,
+    details: error.details ?? null,
+    hint: error.hint ?? null,
+  });
+}
+
 async function requireUserId(): Promise<string> {
   const user = await getSessionUser();
   if (!user) redirect("/login");
@@ -38,6 +55,7 @@ async function claimNextInstruction(db: Db): Promise<ClaimResult> {
   const { data, error } = await db.rpc("claim_next", { p_kind: "instruction" });
 
   if (error) {
+    logRpcError("[claim_next]", error);
     return {
       status: "error",
       message: "The next item could not be loaded. Try again in a moment.",
@@ -153,6 +171,7 @@ export async function submitInstruction(
   });
 
   if (error) {
+    logRpcError("[submit_instruction]", error);
     const message = error.message ?? "";
     if (
       message.includes("CLAIM_EXPIRED") ||
@@ -190,6 +209,7 @@ export async function skipInstruction(itemId: string): Promise<SkipResult> {
   const db = await createClient();
   const { error } = await db.rpc("release_claim", { p_item_id: parsed.data });
   if (error) {
+    logRpcError("[release_claim]", error);
     return { status: "error", message: "The item could not be released. Try again." };
   }
 
@@ -239,6 +259,7 @@ export async function reportInstructionIssue(
     p_item_id: parsed.data.itemId,
   });
   if (releaseError) {
+    logRpcError("[release_claim]", releaseError);
     return {
       status: "error",
       message: "The issue was saved, but the item could not be released. Try again.",

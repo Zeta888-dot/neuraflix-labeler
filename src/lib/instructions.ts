@@ -89,25 +89,29 @@ export function parseEnglishSource(value: unknown): EnglishSource | null {
   return { instruction, input: trimmedString(record.input), response };
 }
 
-/** Reads one claim_next row (snake_case json from PostgREST). */
+/**
+ * Reads one claim_next row (snake_case json from PostgREST). The function's
+ * output columns carry the out_ prefix since 0003, so they cannot shadow a
+ * table column and Postgres cannot call them ambiguous.
+ */
 export function parseInstructionRow(value: unknown): InstructionItem | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
 
-  const id = trimmedString(row.item_id);
-  const english = parseEnglishSource(row.english);
+  const id = trimmedString(row.out_item_id);
+  const english = parseEnglishSource(row.out_english);
   if (!id || !english) return null;
 
   const target =
-    typeof row.target_count === "number" && row.target_count >= 1
-      ? row.target_count
+    typeof row.out_target_count === "number" && row.out_target_count >= 1
+      ? row.out_target_count
       : 1;
 
   return {
     id,
     english,
-    source: trimmedString(row.source),
+    source: trimmedString(row.out_source),
     targetCount: target,
-    claimedUntil: trimmedString(row.claimed_until),
+    claimedUntil: trimmedString(row.out_claimed_until),
   };
 }
