@@ -1,29 +1,12 @@
 # Handoff
 
-Status: Phase L0 complete. Phase L1 has not been started.
-
-## What exists
-
-- App shell in `src/components/app-shell/app-shell.tsx`: fixed collapsible sidebar (persisted in
-  `localStorage`), mobile top bar with drawer, theme toggle, user menu with sign out, skip link.
-- Design tokens, type scale, radii and fonts ported from `reference/site-design/globals.css` into
-  `src/app/globals.css`. Geist, Noto Nastaliq Urdu and Sora load through `next/font` in
-  `src/app/layout.tsx`. Dark is the default theme, set before paint by `src/lib/theme.ts`.
-- Auth: Supabase browser and server helpers in `src/lib/supabase/`, session refresh and optimistic
-  route protection in `src/proxy.ts`, authoritative check in `requireAppUser()` (`src/lib/auth.ts`).
-  `/login` sends a magic link, `/auth/callback` exchanges the code, `/consent` collects the two
-  consent checkboxes and writes `consent_version` plus `consent_at` to `profiles`.
-- Stub pages with honest empty states: Dashboard, Instructions, Conversations, Plain text, OCR,
-  Review, Admin, Guidelines, Account. Review and Admin are hidden unless the profile role allows them.
-- `supabase/migrations/0001_init.sql`: every table, index, RLS policy, the `claim_next` function,
-  the `ocr-lines` storage bucket policies and the trigger that creates a profile row on first login.
-  It has not been run.
+Status: Phase L1 complete. Phase L2 (Conversations module) has not been started.
 
 ## How to run
 
 1. `npm install`
-2. Copy `.env.example` to `.env.local` and fill in the four values. `.env.local` is gitignored;
-   the service role key is only ever used by local scripts under `scripts/`, never by app code.
+2. Copy `.env.example` to `.env.local` and fill in the four values. `.env.local` is gitignored; the
+   service role key is only read by local scripts under `scripts/`, never by app code.
 3. `npm run dev`, then open http://localhost:3000
 4. `npm run build` and `npm run lint` both pass with no warnings.
 
@@ -33,20 +16,57 @@ Status: Phase L0 complete. Phase L1 has not been started.
 2. Authentication, Sign In / Providers: keep email enabled (magic link, no password).
 3. Authentication, URL Configuration: add `http://localhost:3000/auth/callback` as a redirect URL.
    Add the deployed origin's `/auth/callback` too when there is one.
-4. SQL Editor: open `supabase/migrations/0001_init.sql`, paste the whole file and run it once.
-5. Make yourself the first admin with the UPDATE statement in that file's header comment, using your
-   own email address.
+4. SQL Editor: paste all of `supabase/migrations/0001_init.sql` and run it once.
+5. SQL Editor: paste all of `supabase/migrations/0002_instructions.sql` and run it once, after 0001.
+   It adds `english_hash`, `submit_instruction_translation`, `release_claim`, a unique index on
+   `(kind, item_id, contributor_id)` and re-issues `claim_next` for both kinds. It also fixes a 0001
+   bug: `claim_next` inserted a new claim row on every call, so claiming the same item again
+   inflated the item's `active_claims` and could push it past `target_count`. 0002 collapses the
+   duplicate rows that bug left behind, and a repeat claim now renews the caller's own row instead.
+6. Make yourself the first admin with the UPDATE statement in 0001's header comment, using your email.
+
+## Import English items (local)
+
+`npm run import:english -- --file path.jsonl --source name --target-count 1 [--dry-run]`
+
+- One JSON object per line, UTF-8:
+  `{"instruction":"...","input":"...","response":"...","source":"..."}`
+- `instruction` and `response` are required. `input` is optional and is only shown when the English
+  item has one. `source` overrides `--source` for that line. `output` works as an alias of `response`.
+- Lines are trimmed. Blank or invalid lines are skipped with a line number in a warning. Items are
+  deduplicated within the file and against `english_hash` in the database, then inserted in batches
+  of 200. The run ends with a `read / invalid / duplicates / inserted` summary; `--dry-run` writes
+  nothing.
+- First import: `npm run import:english -- --file samples/english-instructions.sample.jsonl --source sample --target-count 1`
+
+## What exists in the app
+
+- App shell, tokens, fonts, auth, consent, profiles, Guidelines and Account pages from L0.
+- `/instructions`: claims one item at a time through a server action, shows the English payload next
+  to three Khowar fields (instruction, input when present, response) with the letters palette,
+  Khowar validation and length warnings from `src/lib/khowar.ts`, Ctrl/Cmd + Enter to submit, skip,
+  report an issue, drafts kept in `localStorage` per item, and a submitted counter.
+- Dashboard shows your real open, in-progress and submitted counts. Admin shows real
+  `instruction_items` totals (open, complete, retired) and the exact import command.
+- `supabase/migrations/0002_instructions.sql` holds every database change for L1 and has not been run.
 
 ## Browser checks
 
-- `/` redirects to `/dashboard`.
-- Signed out, `/dashboard` lands on `/login`; the magic link returns you to `/auth/callback`.
-- First login shows `/consent` with both checkboxes required; later visits skip it.
-- Theme toggle survives a reload with no flash, and both themes hold up at 360px and 1440px.
-- Sidebar collapses, the mobile drawer opens and closes with Escape, tab order reaches the skip link.
-- Review and Admin stay hidden for a normal labeler and appear after the first-admin UPDATE.
+- `/` redirects to `/dashboard`; signed out you land on `/login`.
+- Before the sample import, `/instructions` says no items are available and the Dashboard counts are
+  zero. Honest empty states, no invented numbers.
+- After the import: an item appears with English on the left, Khowar fields on the right, and the
+  palette inserts letters at the caret. Both columns stack at 360px with the action bar pinned to the
+  bottom of the viewport.
+- Submitting moves to the next item, bumps the Dashboard counts and the "you have submitted" line.
+  Reloading mid-page restores the draft. Ctrl/Cmd + Enter submits without the mouse.
+- Skip and report both return you to the next item, and a report shows up under Admin counts.
+- A wrong keyboard layout or empty field blocks the submit with a field error; a suspiciously short
+  Khowar field warns first and lets you "Submit anyway".
+- Tab order reaches the palette, the fields and the three action buttons; check both themes at 360px
+  and 1440px.
 
-## What Phase L1 will do
+## What Phase L2 will do
 
-Instructions module with the Khowar letters palette, `scripts/import-english.ts` reading JSONL into
-items, and the claim system plus validation on top of `claim_next`.
+The Conversations module: same claim and validation shape for multi-turn English conversations,
+reusing `src/lib/khowar.ts`, the claim functions and the Khowar field components from L1.

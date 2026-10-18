@@ -1,0 +1,5 @@
+{"instruction":"Say hello in a friendly way.","response":"Hello! It is good to see you.","source":"sample"}
+{"instruction":"Name three colors.","response":"Red, green and blue.","source":"sample"}
+{"instruction":"What is the capital of France?","response":"The capital of France is Paris.","source":"sample"}
+{"instruction":"Rewrite this greeting in a formal tone.","input":"Good morning, everyone.","response":"Good morning to you all.","source":"sample"}
+{"instruction":"Write a short thank you note.","response":"Thank you for your help. It was kind of you.","source":"sample"}
