@@ -1,26 +1,320 @@
 @import "tailwindcss";
 
+/* ============================================================================
+   NeuraFlix Labeler design tokens
+   ----------------------------------------------------------------------------
+   Ported from reference/site-design/globals.css (the neuraflix.si system),
+   trimmed to what the labeler uses. Base system: DESIGN.md (Vercel-inspired),
+   with the NeuraFlix overrides: dark theme is a pure black canvas with the
+   Vercel blue accent family (#0070f3 fills, #3291ff accent text); the light
+   theme is a warm off-white canvas with Japonica (#D97757).
+
+   Name mapping to DESIGN.md:
+     canvas      <- DESIGN.md canvas-soft   (page background)
+     surface     <- DESIGN.md canvas        (cards, dialogs, menus)
+     band-soft   <- DESIGN.md canvas-soft-2 (alternate section band)
+     solid       <- DESIGN.md primary       (polarity-flipped in dark theme)
+
+   Theme strategy: CSS variables swapped on [data-theme], consumed by Tailwind
+   through @theme inline. Semantic utilities flip with the theme, so components
+   stay free of dark: duplication. Dark is the default (set by the no-flash
+   script in src/app/layout.tsx).
+   ========================================================================== */
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* surfaces */
+  --canvas: #f8f5f2;
+  --surface: #fffdfb;
+  --surface-2: #f2ede8;
+  --band-soft: #f1ebe4;
+
+  /* lines */
+  --hairline: #e6ded6;
+  --hairline-strong: #b3a69a;
+
+  /* text */
+  --ink: #1a1410;
+  --body: #5f5349;
+  --mute: #6f635a;
+
+  /* solid: the conversion surface. Ink in light, warm white in dark. */
+  --solid: #1a1410;
+  --solid-hover: #2b231d;
+  --on-solid: #f6f2ee;
+
+  /* accent: Japonica. accent-text is the text-safe tone; it clears 4.5:1 on
+     canvas, band-soft and accent-soft in both themes. */
+  --accent: #d97757;
+  --accent-text: #a94b26;
+  --accent-soft: #f9eae2;
+  --accent-hover: #c4653f;
+  --on-accent: #1a1410;
+
+  /* Focus ring. In the light theme the ring uses the darker accent: #d97757
+     is only 2.6 to 2.9:1 on the light surfaces and a focus indicator needs
+     3:1 (WCAG 1.4.11). */
+  --focus: #a94b26;
+  --selection-bg: #1a1410;
+  --selection-fg: #f6f2ee;
+  --error: #c50000;
+
+  /* elevation: stacked small offsets + inset hairline, warm-tinted */
+  --elev-1: inset 0 0 0 1px rgb(26 20 16 / 0.08);
+  --elev-2:
+    0 1px 1px rgb(26 20 16 / 0.02), 0 2px 2px rgb(26 20 16 / 0.04),
+    inset 0 0 0 1px rgb(26 20 16 / 0.08);
+  --elev-3:
+    0 2px 2px rgb(26 20 16 / 0.04), 0 8px 8px -8px rgb(26 20 16 / 0.05),
+    inset 0 0 0 1px rgb(26 20 16 / 0.08);
+  --elev-4:
+    0 2px 2px rgb(26 20 16 / 0.04), 0 8px 16px -4px rgb(26 20 16 / 0.05),
+    inset 0 0 0 1px rgb(26 20 16 / 0.08);
+  --elev-5:
+    0 1px 1px rgb(26 20 16 / 0.02), 0 8px 16px -4px rgb(26 20 16 / 0.05),
+    0 24px 32px -8px rgb(26 20 16 / 0.06), inset 0 0 0 1px rgb(26 20 16 / 0.08);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* surfaces: DESIGN.md's near-black ladder on a pure black canvas */
+  --canvas: #000000;
+  --surface: #0a0a0a;
+  --surface-2: #111111;
+  --band-soft: #0a0a0a;
+
+  /* lines: translucent white hairlines over black */
+  --hairline: rgb(255 255 255 / 0.1);
+  --hairline-strong: rgb(255 255 255 / 0.16);
+
+  /* text: neutral grays, 8.1:1 (body) and 6.5:1 (mute) on the canvas */
+  --ink: #ededed;
+  --body: #a1a1a1;
+  --mute: #8f8f8f;
+
+  --solid: #f6f2ee;
+  --solid-hover: #fffdfb;
+  --on-solid: #000000;
+
+  /* accent: Vercel blue. #3291ff is the text-safe step on black, #0070f3
+     carries fills and rings (4.5:1 with white text). */
+  --accent: #0070f3;
+  --accent-text: #3291ff;
+  --accent-soft: rgb(0 112 243 / 0.18);
+  --accent-hover: #0761d1;
+  --on-accent: #ffffff;
+
+  --focus: #0070f3;
+  --selection-bg: #0070f3;
+  --selection-fg: #ffffff;
+  --error: #ff6369;
+
+  /* elevation: white inset hairline, shadows stay shallow on black */
+  --elev-1: inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  --elev-2:
+    0 1px 1px rgb(0 0 0 / 0.24), 0 2px 2px rgb(0 0 0 / 0.24),
+    inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  --elev-3:
+    0 2px 2px rgb(0 0 0 / 0.24), 0 8px 8px -8px rgb(0 0 0 / 0.3),
+    inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  --elev-4:
+    0 2px 2px rgb(0 0 0 / 0.24), 0 8px 16px -4px rgb(0 0 0 / 0.32),
+    inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  --elev-5:
+    0 1px 1px rgb(0 0 0 / 0.24), 0 8px 16px -4px rgb(0 0 0 / 0.32),
+    0 24px 32px -8px rgb(0 0 0 / 0.4), inset 0 0 0 1px rgb(255 255 255 / 0.1);
+}
+
+/* Font stacks live outside @theme so base styles can reference them directly. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --app-font-sans: var(--font-geist), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --app-font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  --app-font-wordmark: var(--font-sora), var(--font-geist), ui-sans-serif,
+    sans-serif;
+  /* Khowar / Urdu Nastaliq. The fallbacks must cover the Khowar-only letters
+     U+0681, U+0685 and U+076E to U+0771 until the web face is ready. */
+  --app-font-nastaliq: var(--font-noto-nastaliq), "Noto Naskh Arabic",
+    "Arabic Typesetting", "Segoe UI", Tahoma, serif;
+
+  --ease-out-quart: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --dur-3: 240ms;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* colors */
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-band-soft: var(--band-soft);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-ink: var(--ink);
+  --color-body: var(--body);
+  --color-mute: var(--mute);
+  --color-solid: var(--solid);
+  --color-solid-hover: var(--solid-hover);
+  --color-on-solid: var(--on-solid);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-hover: var(--accent-hover);
+  --color-on-accent: var(--on-accent);
+  --color-error: var(--error);
+
+  /* fonts */
+  --font-sans: var(--app-font-sans);
+  --font-mono: var(--app-font-mono);
+  --font-wordmark: var(--app-font-wordmark);
+  --font-nastaliq: var(--app-font-nastaliq);
+
+  /* type scale, exactly as specified in DESIGN.md (px line heights kept) */
+  --text-display-xl: 48px;
+  --text-display-xl--line-height: 48px;
+  --text-display-xl--letter-spacing: -0.05em;
+  --text-display-xl--font-weight: 600;
+
+  --text-display-lg: 32px;
+  --text-display-lg--line-height: 40px;
+  --text-display-lg--letter-spacing: -0.04em;
+  --text-display-lg--font-weight: 600;
+
+  --text-display-md: 24px;
+  --text-display-md--line-height: 32px;
+  --text-display-md--letter-spacing: -0.04em;
+  --text-display-md--font-weight: 600;
+
+  --text-display-sm: 20px;
+  --text-display-sm--line-height: 28px;
+  --text-display-sm--letter-spacing: -0.03em;
+  --text-display-sm--font-weight: 600;
+
+  --text-body-lg: 18px;
+  --text-body-lg--line-height: 28px;
+
+  --text-body-md: 16px;
+  --text-body-md--line-height: 24px;
+
+  --text-body-sm: 14px;
+  --text-body-sm--line-height: 20px;
+  --text-body-sm--letter-spacing: -0.02em;
+
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+
+  /* radius. Containers use --radius-lg (8px); small inner elements (inputs,
+     selects, small panels) use --radius-md (6px). Only buttons, badges and
+     avatars are fully rounded. */
+  --radius-sm: 6px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-pill: 100px;
+  --radius-full: 9999px;
+
+  /* elevation */
+  --shadow-elev-1: var(--elev-1);
+  --shadow-elev-2: var(--elev-2);
+  --shadow-elev-3: var(--elev-3);
+  --shadow-elev-4: var(--elev-4);
+  --shadow-elev-5: var(--elev-5);
+
+  /* motion */
+  --ease-out-quart: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--hairline);
+  }
+
+  html {
+    scrollbar-gutter: stable;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--canvas);
+    color: var(--body);
+    font-family: var(--app-font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    color: var(--ink);
+  }
+
+  ::selection {
+    background-color: var(--selection-bg);
+    color: var(--selection-fg);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  ::placeholder {
+    color: var(--mute);
+    opacity: 1;
+  }
+
+  /* Native dialog used by the mobile drawer and small sheets. */
+  dialog::backdrop {
+    background-color: rgb(0 0 0 / 0.5);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  /* Khowar / Urdu script block. Nastaliq runs right to left and needs the
+     extra leading declared in the type scale above. */
+  .script-nastaliq {
+    font-family: var(--app-font-nastaliq);
+    direction: rtl;
+    text-align: right;
+    line-height: 2.1;
+    font-feature-settings: "kern", "liga", "calt";
+  }
+
+  /* Native dialog panels (src/components/ui/sheet.tsx). Transform and opacity
+     only; the reduced-motion block above collapses the duration. */
+  .sheet-panel {
+    animation: sheet-in var(--dur-3) var(--ease-out-quart);
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--sheet-shift, -12px));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }

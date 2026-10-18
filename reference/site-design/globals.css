@@ -1,0 +1,511 @@
+@import "tailwindcss";
+
+/* ============================================================================
+   NeuraFlix design tokens
+   ----------------------------------------------------------------------------
+   Base system: DESIGN.md (Vercel-inspired). Overrides from NEURAFLIX.md §4:
+     - dark theme (the hero theme, final): pure black #000000 canvas, neutral
+       grays above it, and the Vercel blue accent family (#0070f3 for fills,
+       dots and focus rings, #3291ff for accent text)
+     - light theme: warm off-white surfaces with Japonica #D97757, and the
+       warm #1A1410 ink / solid surface
+     - both themes keep Vercel's hairline / hairline-strong border and
+       contrast logic
+
+   Dark theme: the [data-theme="dark"] block below is the final Vercel-style
+   pass, not a test branch: black canvas, the near-black raised steps from
+   DESIGN.md, translucent white hairlines, neutral gray text and the Vercel
+   blue accent family. The light theme keeps the warm scale and Japonica
+   exactly as before. The primary button surface (--solid / --solid-hover)
+   stays warm white in dark on purpose; its label (--on-solid) is neutral
+   black, like the rest of the dark theme.
+
+   Name mapping to DESIGN.md:
+     canvas      <- DESIGN.md canvas-soft   (page background)
+     surface     <- DESIGN.md canvas        (cards, dialogs, menus)
+     band-soft   <- DESIGN.md canvas-soft-2 (alternate section band)
+     solid       <- DESIGN.md primary       (polarity-flipped in dark theme)
+
+   Theme strategy: CSS variables swapped on [data-theme], consumed by Tailwind
+   through @theme inline. Semantic utilities therefore flip with the theme and
+   components stay free of dark: duplication.
+   ========================================================================== */
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* surfaces */
+  --canvas: #f8f5f2;
+  --surface: #fffdfb;
+  --surface-2: #f2ede8;
+  --band-soft: #f1ebe4;
+
+  /* lines */
+  --hairline: #e6ded6;
+  --hairline-strong: #b3a69a;
+
+  /* text */
+  --ink: #1a1410;
+  --body: #5f5349;
+  /* Was #7e7268: 4.3:1 on the light canvas, which fails WCAG AA for small
+     text. Now 5.36:1 on canvas and 4.92:1 on band-soft. */
+  --mute: #6f635a;
+
+  /* solid: the conversion surface. Ink in light, warm white in dark. */
+  --solid: #1a1410;
+  --solid-hover: #2b231d;
+  --on-solid: #f6f2ee;
+
+  /* accent: Japonica. accent-text is the text-safe tone per theme: it clears
+     4.5:1 on canvas, band-soft and accent-soft in both themes. */
+  --accent: #d97757;
+  --accent-text: #a94b26;
+  --accent-soft: #f9eae2;
+  --accent-hover: #c4653f;
+  --on-accent: #1a1410;
+
+  /* Focus ring. In light theme the ring uses the darker accent: #d97757 is
+     only 2.6 to 2.9:1 on the light surfaces and a focus indicator needs 3:1
+     (WCAG 1.4.11). In dark theme it is 5.8:1 and stays. */
+  --focus: #a94b26;
+  --selection-bg: #1a1410;
+  --selection-fg: #f6f2ee;
+  /* validation text: DESIGN.md error-deep for the light canvas (about 7:1) */
+  --error: #c50000;
+
+  /* elevation: stacked small offsets + inset hairline, warm-tinted */
+  --elev-1: inset 0 0 0 1px rgb(26 20 16 / 0.08);
+  --elev-2:
+    0 1px 1px rgb(26 20 16 / 0.02), 0 2px 2px rgb(26 20 16 / 0.04),
+    inset 0 0 0 1px rgb(26 20 16 / 0.08);
+  --elev-3:
+    0 2px 2px rgb(26 20 16 / 0.04), 0 8px 8px -8px rgb(26 20 16 / 0.05),
+    inset 0 0 0 1px rgb(26 20 16 / 0.08);
+  --elev-4:
+    0 2px 2px rgb(26 20 16 / 0.04), 0 8px 16px -4px rgb(26 20 16 / 0.05),
+    inset 0 0 0 1px rgb(26 20 16 / 0.08);
+  --elev-5:
+    0 1px 1px rgb(26 20 16 / 0.02), 0 8px 16px -4px rgb(26 20 16 / 0.05),
+    0 24px 32px -8px rgb(26 20 16 / 0.06), inset 0 0 0 1px rgb(26 20 16 / 0.08);
+
+  /* Showcase app window (AppWindow). The light theme gets a very soft neutral
+     shadow instead of the dark theme's white glow haze. */
+  --window-shadow:
+    var(--elev-3), 0 32px 64px -32px rgb(26 20 16 / 0.18);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* surfaces: DESIGN.md's near-black ladder on a pure black canvas. Every
+     step is a neutral gray: no warm tint anywhere in the dark theme. */
+  --canvas: #000000;
+  --surface: #0a0a0a;
+  --surface-2: #111111;
+  --band-soft: #0a0a0a;
+
+  /* lines: Vercel's translucent white hairlines over black */
+  --hairline: rgb(255 255 255 / 0.1);
+  --hairline-strong: rgb(255 255 255 / 0.16);
+
+  /* text: neutral grays. 8.1:1 (body) and 6.5:1 (mute) on the black canvas. */
+  --ink: #ededed;
+  --body: #a1a1a1;
+  --mute: #8f8f8f;
+
+  --solid: #f6f2ee;
+  --solid-hover: #fffdfb;
+  /* Neutral black: the last warm hex that used to sit in this theme (it was
+     #1a1410, the light ink tone). The button surface above stays warm white. */
+  --on-solid: #000000;
+
+  /* accent: Vercel blue. accent-text is the lighter step (#3291ff, 6.6:1 on
+     black); fills, dots and rings use #0070f3, which still clears 4.5:1 with
+     white text. accent-hover deepens one step, the same direction the light
+     theme takes, so the white label keeps its ratio while hovering. */
+  --accent: #0070f3;
+  --accent-text: #3291ff;
+  --accent-soft: rgb(0 112 243 / 0.18);
+  --accent-hover: #0761d1;
+  --on-accent: #ffffff;
+
+  /* Focus ring and selection follow the accent token in this theme. */
+  --focus: #0070f3;
+  --selection-bg: #0070f3;
+  --selection-fg: #ffffff;
+  /* validation text: the Geist dark red, 7.2:1 on the black canvas */
+  --error: #ff6369;
+
+  /* elevation: white inset hairline, shadows stay shallow on black */
+  --elev-1: inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  --elev-2:
+    0 1px 1px rgb(0 0 0 / 0.24), 0 2px 2px rgb(0 0 0 / 0.24),
+    inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  --elev-3:
+    0 2px 2px rgb(0 0 0 / 0.24), 0 8px 8px -8px rgb(0 0 0 / 0.3),
+    inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  --elev-4:
+    0 2px 2px rgb(0 0 0 / 0.24), 0 8px 16px -4px rgb(0 0 0 / 0.32),
+    inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  --elev-5:
+    0 1px 1px rgb(0 0 0 / 0.24), 0 8px 16px -4px rgb(0 0 0 / 0.32),
+    0 24px 32px -8px rgb(0 0 0 / 0.4), inset 0 0 0 1px rgb(255 255 255 / 0.1);
+
+  /* Showcase app window: the neutral elevation plus the 1px inner top
+     highlight that catches the glow haze above the window. */
+  --window-shadow:
+    var(--elev-3), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+/* Font stacks live outside @theme so base styles can reference them directly. */
+:root {
+  --app-font-sans: var(--font-geist), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --app-font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  --app-font-wordmark: var(--font-sora), var(--font-geist), ui-sans-serif,
+    sans-serif;
+  /* Khowar / Urdu Nastaliq, as two stacks. The web face (Noto Nastaliq Urdu)
+     is a 234 KB woff2, and every script block on the site sits below the fold
+     on first paint, so `.script-nastaliq` starts on the system stack and the
+     web face is applied only once script text comes near the viewport
+     (ScriptFontLoader sets data-script-font on <html>; layout.tsx restores the
+     web face when JS is off). The fallbacks must cover the Khowar-only
+     letters U+0681, U+0685 and U+076E-U+0771. */
+  --app-font-nastaliq: var(--font-noto-nastaliq), "Noto Naskh Arabic",
+    "Arabic Typesetting", "Segoe UI", Tahoma, serif;
+  --app-font-nastaliq-system: "Noto Naskh Arabic", "Arabic Typesetting",
+    "Segoe UI", Tahoma, serif;
+
+  --ease-out-quart: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --dur-3: 240ms;
+  --dur-4: 320ms;
+
+  /* Mesh gradient palette (src/components/ui/MeshGradient.tsx). Deliberately
+     identical in both themes. The hero keeps the deep-navy base; the cover
+     variants are bright, painterly gradients on light to mid-tone bases.
+     Never used for text surfaces. Only the hero and the cover-* variants
+     exist. */
+  --grad-base: #050816;
+  --grad-blue: #0070f3;
+  --grad-sky: #3291ff;
+  --grad-indigo: #4f46e5;
+  --grad-cyan: #22d3ee;
+  --grad-white: #ffffff;
+  /* Bright cover colours: cover-aurora, cover-meadow, cover-lavender. */
+  --grad-deep: #1d4ed8;
+  --grad-royal: #2563eb;
+  --grad-azure: #38bdf8;
+  --grad-mint: #67e8f9;
+  --grad-lime: #a3e635;
+  --grad-green: #4ade80;
+  --grad-teal: #2dd4bf;
+  --grad-pale: #e0e7ff;
+  --grad-violet: #c4b5fd;
+  --grad-sky-soft: #7dd3fc;
+}
+
+@theme inline {
+  /* colors */
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-band-soft: var(--band-soft);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-ink: var(--ink);
+  --color-body: var(--body);
+  --color-mute: var(--mute);
+  --color-solid: var(--solid);
+  --color-solid-hover: var(--solid-hover);
+  --color-on-solid: var(--on-solid);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-hover: var(--accent-hover);
+  --color-on-accent: var(--on-accent);
+  --color-error: var(--error);
+
+  /* fonts */
+  --font-sans: var(--app-font-sans);
+  --font-mono: var(--app-font-mono);
+  --font-wordmark: var(--app-font-wordmark);
+  --font-nastaliq: var(--app-font-nastaliq);
+
+  /* type scale, exactly as specified in DESIGN.md (px line heights kept) */
+  --text-display-xl: 48px;
+  --text-display-xl--line-height: 48px;
+  --text-display-xl--letter-spacing: -0.05em;
+  --text-display-xl--font-weight: 600;
+
+  --text-display-lg: 32px;
+  --text-display-lg--line-height: 40px;
+  --text-display-lg--letter-spacing: -0.04em;
+  --text-display-lg--font-weight: 600;
+
+  --text-display-md: 24px;
+  --text-display-md--line-height: 32px;
+  --text-display-md--letter-spacing: -0.04em;
+  --text-display-md--font-weight: 600;
+
+  --text-display-sm: 20px;
+  --text-display-sm--line-height: 28px;
+  --text-display-sm--letter-spacing: -0.03em;
+  --text-display-sm--font-weight: 600;
+
+  --text-body-lg: 18px;
+  --text-body-lg--line-height: 28px;
+
+  --text-body-md: 16px;
+  --text-body-md--line-height: 24px;
+
+  --text-body-md-strong: 16px;
+  --text-body-md-strong--line-height: 24px;
+  --text-body-md-strong--font-weight: 500;
+
+  --text-body-sm: 14px;
+  --text-body-sm--line-height: 20px;
+  --text-body-sm--letter-spacing: -0.02em;
+
+  --text-body-sm-strong: 14px;
+  --text-body-sm-strong--line-height: 20px;
+  --text-body-sm-strong--letter-spacing: -0.02em;
+  --text-body-sm-strong--font-weight: 500;
+
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+
+  --text-caption-mono: 12px;
+  --text-caption-mono--line-height: 16px;
+
+  --text-code: 13px;
+  --text-code--line-height: 20px;
+
+  --text-button-md: 14px;
+  --text-button-md--line-height: 20px;
+  --text-button-md--font-weight: 500;
+
+  --text-button-lg: 16px;
+  --text-button-lg--line-height: 24px;
+  --text-button-lg--font-weight: 500;
+
+  /* Nastaliq script sizes. Line heights stay generous on purpose: Nastaliq
+     stacks letters diagonally and needs vertical room to avoid clipping. */
+  --text-nastaliq-xl: 36px;
+  --text-nastaliq-xl--line-height: 2.1;
+  --text-nastaliq-lg: 30px;
+  --text-nastaliq-lg--line-height: 2.1;
+  --text-nastaliq-md: 22px;
+  --text-nastaliq-md--line-height: 2.1;
+  --text-nastaliq-sm: 17px;
+  --text-nastaliq-sm--line-height: 2.05;
+
+  /* radius. Containers use --radius-lg (8px); small inner elements (inputs,
+     selects, small panels) use --radius-md (6px). Only buttons, badges and
+     avatars are fully rounded (pill / circle). */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-pill-sm: 64px;
+  --radius-pill: 100px;
+  --radius-full: 9999px;
+
+  /* elevation */
+  --shadow-elev-1: var(--elev-1);
+  --shadow-elev-2: var(--elev-2);
+  --shadow-elev-3: var(--elev-3);
+  --shadow-elev-4: var(--elev-4);
+  --shadow-elev-5: var(--elev-5);
+  --shadow-window: var(--window-shadow);
+
+  /* motion */
+  --ease-out-quart: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--hairline);
+  }
+
+  html {
+    scrollbar-gutter: stable;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--canvas);
+    color: var(--body);
+    font-family: var(--app-font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    color: var(--ink);
+  }
+
+  ::selection {
+    background-color: var(--selection-bg);
+    color: var(--selection-fg);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  ::placeholder {
+    color: var(--mute);
+    opacity: 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Khowar / Urdu script block. Nastaliq runs right to left and needs the
+     extra leading declared above. Starts on the system Arabic stack: see the
+     two font variables at the top of this file. */
+  .script-nastaliq {
+    font-family: var(--app-font-nastaliq-system);
+    direction: rtl;
+    text-align: right;
+    line-height: 2.1;
+    font-feature-settings: "kern", "liga", "calt";
+  }
+
+  /* Set by ScriptFontLoader once script text is near the viewport. */
+  [data-script-font="ready"] .script-nastaliq {
+    font-family: var(--app-font-nastaliq);
+  }
+
+  /* Showcase app window (src/components/showcase/AppWindow.tsx). The window
+     sits directly on the page background and fades into it at the bottom. A
+     mask rather than an overlay, so the fade lands on whatever the section
+     actually paints behind the window, not on a colour guessed here. Static by
+     design: there is no motion in it, so prefers-reduced-motion needs no
+     override. */
+  .window-fade {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      #000 calc(100% - 4rem),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      #000 calc(100% - 4rem),
+      transparent 100%
+    );
+  }
+
+  /* The showcase window's glow wrapper (ShowcaseRow). A neutral white haze,
+     strongest above and around the window's top edge, dark theme only; the
+     light theme carries --window-shadow instead. It is a pseudo-element, so
+     there is nothing extra to announce or click, and the row section clips it
+     horizontally (overflow-x-clip) so it can never add page scroll. */
+  .window-glow {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .window-glow::before {
+    content: "";
+    position: absolute;
+    inset: -48px;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  [data-theme="dark"] .window-glow::before {
+    background: radial-gradient(
+      ellipse at 50% 0%,
+      rgb(255 255 255 / 0.1),
+      transparent 70%
+    );
+    filter: blur(40px);
+  }
+
+  /* Voice mode orb. The slow idle pulse is CSS only, transform and opacity
+     only, and it does not exist at all under prefers-reduced-motion, so the
+     orb holds its static frame. */
+  .voice-orb {
+    background: radial-gradient(
+      circle at 35% 30%,
+      var(--accent-soft),
+      var(--surface-2) 72%
+    );
+    box-shadow: inset 0 0 0 1px var(--hairline);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .voice-orb {
+      animation: voice-orb-pulse 7s ease-in-out infinite;
+    }
+  }
+
+  /* The hero ambient gradient (src/components/home/Hero.tsx), dark theme only:
+     faded out toward the bottom and the sides so it never fights the copy. */
+  .hero-mesh {
+    -webkit-mask-image: radial-gradient(
+      120% 120% at 50% 0%,
+      #000 32%,
+      transparent 76%
+    );
+    mask-image: radial-gradient(120% 120% at 50% 0%, #000 32%, transparent 76%);
+  }
+
+  /* The hero's slow blob drift. Only the hero variant animates, and only
+     inside prefers-reduced-motion: no-preference, so reduced motion gets the
+     static frame. Transform only, 44 to 60 seconds per blob (set inline per
+     blob), ease-in-out and alternating: the shapes breathe, they never move
+     noticeably. */
+  @media (prefers-reduced-motion: no-preference) {
+    .mesh-drift {
+      animation: mesh-blob-drift 52s ease-in-out infinite alternate;
+    }
+  }
+}
+
+@keyframes voice-orb-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+}
+
+/* Transform only: the blur and the blend stay untouched, so the drift is cheap
+   and cannot trigger layout. */
+@keyframes mesh-blob-drift {
+  from {
+    transform: translate3d(-2.5%, 1.5%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(2.5%, -2.5%, 0) scale(1.05);
+  }
+}
