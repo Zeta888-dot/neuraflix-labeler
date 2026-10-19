@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type KeyboardEvent,
   type RefObject,
 } from "react";
 import { cn } from "@/lib/cn";
@@ -58,6 +59,9 @@ export function KhowarField({
   hint,
   disabled,
   fieldRef,
+  inputRef,
+  singleLine = false,
+  onKeyDown,
   showCount = true,
   textareaClassName,
 }: {
@@ -72,30 +76,39 @@ export function KhowarField({
   disabled?: boolean;
   /** Filled with the textarea so the page can focus the first invalid field. */
   fieldRef?: RefObject<HTMLTextAreaElement | null>;
+  /** Filled with the input when singleLine is set. */
+  inputRef?: RefObject<HTMLInputElement | null>;
+  /** A one-line input for labels that must never contain a newline. */
+  singleLine?: boolean;
+  onKeyDown?: (
+    event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => void;
   /** The plain text form shows its own stats row instead. */
   showCount?: boolean;
   /** Extra classes for the textarea, such as a minimum height. */
   textareaClassName?: string;
 }) {
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fieldNodeRef = useRef<HTMLTextAreaElement | HTMLInputElement | null>(
+    null,
+  );
   const caretRef = useRef<number | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   // Restore the caret after the value changed and React re-rendered the field.
   useEffect(() => {
     if (caretRef.current === null) return;
-    const textarea = textareaRef.current;
-    if (!textarea) return;
+    const field = fieldNodeRef.current;
+    if (!field) return;
     const caret = caretRef.current;
-    textarea.focus();
-    textarea.setSelectionRange(caret, caret);
+    field.focus();
+    field.setSelectionRange(caret, caret);
     caretRef.current = null;
   }, [value]);
 
   function insert(char: string) {
-    const textarea = textareaRef.current;
-    const start = textarea?.selectionStart ?? value.length;
-    const end = textarea?.selectionEnd ?? start;
+    const field = fieldNodeRef.current;
+    const start = field?.selectionStart ?? value.length;
+    const end = field?.selectionEnd ?? start;
     caretRef.current = start + char.length;
     onChange(value.slice(0, start) + char + value.slice(end));
   }
@@ -109,7 +122,7 @@ export function KhowarField({
       .filter(Boolean)
       .join(" ") || undefined;
 
-  const count = value.length;
+  const count = singleLine ? Array.from(value).length : value.length;
 
   return (
     <div className="flex flex-col gap-2">
@@ -133,34 +146,70 @@ export function KhowarField({
         </button>
       </div>
 
-      <textarea
-        ref={(node) => {
-          textareaRef.current = node;
-          if (fieldRef) fieldRef.current = node;
-        }}
-        id={id}
-        name={id}
-        rows={rows}
-        dir="rtl"
-        lang="khw"
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
-        disabled={disabled}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy}
-        className={cn(
-          "script-nastaliq w-full resize-y rounded-md bg-surface px-3 py-2 text-body-md text-ink",
-          "shadow-elev-1 outline-none",
-          "transition-colors duration-150 ease-[var(--ease-out-quart)]",
-          "hover:border-hairline-strong",
-          "disabled:cursor-not-allowed disabled:opacity-60",
-          error && "ring-1 ring-error",
-          textareaClassName,
-        )}
-      />
+      {singleLine ? (
+        <input
+          ref={(node) => {
+            fieldNodeRef.current = node;
+            if (inputRef) inputRef.current = node;
+          }}
+          id={id}
+          name={id}
+          type="text"
+          dir="rtl"
+          lang="khw"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          autoComplete="off"
+          disabled={disabled}
+          value={value}
+          onChange={(event) =>
+            onChange(event.target.value.replace(/[\r\n\u2028\u2029]/g, " "))
+          }
+          onKeyDown={onKeyDown}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={describedBy}
+          className={cn(
+            "script-nastaliq h-11 w-full rounded-md bg-surface px-3 text-body-md text-ink",
+            "shadow-elev-1 outline-none",
+            "transition-colors duration-150 ease-[var(--ease-out-quart)]",
+            "hover:border-hairline-strong",
+            "disabled:cursor-not-allowed disabled:opacity-60",
+            error && "ring-1 ring-error",
+            textareaClassName,
+          )}
+        />
+      ) : (
+        <textarea
+          ref={(node) => {
+            fieldNodeRef.current = node;
+            if (fieldRef) fieldRef.current = node;
+          }}
+          id={id}
+          name={id}
+          rows={rows}
+          dir="rtl"
+          lang="khw"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          disabled={disabled}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={onKeyDown}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={describedBy}
+          className={cn(
+            "script-nastaliq w-full resize-y rounded-md bg-surface px-3 py-2 text-body-md text-ink",
+            "shadow-elev-1 outline-none",
+            "transition-colors duration-150 ease-[var(--ease-out-quart)]",
+            "hover:border-hairline-strong",
+            "disabled:cursor-not-allowed disabled:opacity-60",
+            error && "ring-1 ring-error",
+            textareaClassName,
+          )}
+        />
+      )}
 
       <div
         id={paletteId}
@@ -201,7 +250,11 @@ export function KhowarField({
       ) : null}
 
       {error ? (
-        <p id={errorId} className="flex items-start gap-1.5 text-caption text-error">
+        <p
+          id={errorId}
+          role="alert"
+          className="flex items-start gap-1.5 text-caption text-error"
+        >
           <WarningCircle
             size={14}
             weight="light"
