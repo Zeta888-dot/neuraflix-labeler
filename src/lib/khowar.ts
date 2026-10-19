@@ -426,3 +426,181 @@ export function validateConversationTranslation(
 
   return { success: true, data: parsed.data, warnings };
 }
+
+/* ---------------------------------------------------------------------------
+ * Plain text (Phase L3). Paragraph breaks are part of the text, so the plain
+ * text pass keeps newlines while applying the same control and space rules as
+ * normalizeKhowar. One schema is imported by the form and by the action.
+ * ------------------------------------------------------------------------ */
+
+export const PLAIN_TEXT_MIN = 20;
+export const PLAIN_TEXT_MAX = 20000;
+export const PLAIN_TEXT_TITLE_MAX = 120;
+export const PLAIN_TEXT_SOURCE_MAX = 300;
+
+/** Code points, matching char_length in Postgres. */
+export function countCharacters(value: string): number {
+  return Array.from(value).length;
+}
+
+/**
+ * normalizeKhowar applied paragraph by paragraph. Runs of two or more
+ * newlines become one blank line, single newlines stay, and spaces around
+ * newlines are removed. Paragraph breaks are kept.
+ */
+export function normalizePlainText(value: string): string {
+  return value
+    .normalize("NFC")
+    .replace(/\r\n?/g, "\n")
+    .replace(/^[^\S\n]+$/gm, "")
+    .split(/\n{2,}/)
+    .map((paragraph) => normalizeKhowar(paragraph))
+    .filter((paragraph) => paragraph !== "")
+    .join("\n\n")
+    .replace(/[^\S\n]*\n[^\S\n]*/g, "\n");
+}
+
+/**
+ * The string hashed into text_submissions.text_hash: the normalized text with
+ * every whitespace run collapsed to one space and trimmed. Case is kept.
+ */
+export function plainTextHashSource(value: string): string {
+  return normalizeWhitespace(normalizePlainText(value));
+}
+
+/** sha256 hex of the hash source. Uses Web Crypto on the client and the server. */
+export async function plainTextHash(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(plainTextHashSource(value)),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+export type PlainTextStats = {
+  characters: number;
+  words: number;
+  arabicPercent: number;
+  letters: number;
+};
+
+/** Live counters for the plain text form. */
+export function plainTextStats(value: string): PlainTextStats {
+  const text = normalizePlainText(value);
+  const stats = khowarLetterStats(text);
+
+  return {
+    characters: countCharacters(text),
+    words: text === "" ? 0 : text.split(/\s+/u).filter(Boolean).length,
+    arabicPercent:
+      stats.letters === 0
+        ? 0
+        : Math.floor((stats.arabic * 100) / stats.letters),
+    letters: stats.letters,
+  };
+}
+
+const plainTextFieldNames = [
+  "title",
+  "khowar_text",
+  "source_note",
+  "rights_confirmed",
+] as const;
+
+export type PlainTextFieldName = (typeof plainTextFieldNames)[number];
+
+export type PlainTextFieldErrors = Partial<Record<PlainTextFieldName, string>>;
+
+function isPlainTextFieldName(value: unknown): value is PlainTextFieldName {
+  return (
+    typeof value === "string" &&
+    (plainTextFieldNames as readonly string[]).includes(value)
+  );
+}
+
+function optionalPlainTextField(max: number, message: string) {
+  return z
+    .string()
+    .superRefine((value, ctx) => {
+      if (countCharacters(value.trim()) > max) {
+        ctx.addIssue({ code: "custom", message });
+      }
+    })
+    .transform((value) => {
+      const trimmed = value.trim();
+      return trimmed === "" ? null : trimmed;
+    });
+}
+
+const plainTextBodyField = z
+  .string()
+  .superRefine((value, ctx) => {
+    const text = normalizePlainText(value);
+    const characters = countCharacters(text);
+
+    if (characters < PLAIN_TEXT_MIN) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Write or paste at least ${PLAIN_TEXT_MIN} characters.`,
+      });
+      return;
+    }
+    if (characters > PLAIN_TEXT_MAX) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Keep the text under 20,000 characters.",
+      });
+      return;
+    }
+
+    const stats = khowarLetterStats(text);
+    if (stats.letters === 0 || stats.arabic / stats.letters < 0.6) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Write this in Perso-Arabic script. At least 60 percent of the letters must be Khowar letters.",
+      });
+      return;
+    }
+    if (stats.latin / stats.letters > 0.2) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Too many Latin letters. Keep Latin letters under 20 percent of the text.",
+      });
+    }
+  })
+  .transform(normalizePlainText);
+
+export const plainTextSubmissionSchema = z.object({
+  title: optionalPlainTextField(
+    PLAIN_TEXT_TITLE_MAX,
+    "Keep the title under 120 characters.",
+  ),
+  khowar_text: plainTextBodyField,
+  source_note: optionalPlainTextField(
+    PLAIN_TEXT_SOURCE_MAX,
+    "Keep the source note under 300 characters.",
+  ),
+  rights_confirmed: z.literal(true, {
+    error: "Confirm that you have the right to share this text.",
+  }),
+});
+
+export type PlainTextSubmission = z.output<typeof plainTextSubmissionSchema>;
+
+/** First message per field, in a shape the form and the action both use. */
+export function plainTextFieldErrors(error: z.ZodError): PlainTextFieldErrors {
+  const errors: PlainTextFieldErrors = {};
+
+  for (const issue of error.issues) {
+    const field = issue.path[0];
+    if (isPlainTextFieldName(field) && !errors[field]) {
+      errors[field] = issue.message;
+    }
+  }
+
+  return errors;
+}

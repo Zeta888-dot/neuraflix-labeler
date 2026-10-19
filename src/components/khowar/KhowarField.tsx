@@ -58,6 +58,8 @@ export function KhowarField({
   hint,
   disabled,
   fieldRef,
+  showCount = true,
+  textareaClassName,
 }: {
   id: string;
   label: string;
@@ -70,6 +72,10 @@ export function KhowarField({
   disabled?: boolean;
   /** Filled with the textarea so the page can focus the first invalid field. */
   fieldRef?: RefObject<HTMLTextAreaElement | null>;
+  /** The plain text form shows its own stats row instead. */
+  showCount?: boolean;
+  /** Extra classes for the textarea, such as a minimum height. */
+  textareaClassName?: string;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const caretRef = useRef<number | null>(null);
@@ -152,6 +158,7 @@ export function KhowarField({
           "hover:border-hairline-strong",
           "disabled:cursor-not-allowed disabled:opacity-60",
           error && "ring-1 ring-error",
+          textareaClassName,
         )}
       />
 
@@ -182,12 +189,16 @@ export function KhowarField({
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 text-caption text-mute">
-        <span>
-          {count} {count === 1 ? "character" : "characters"}
-        </span>
-        {hint ? <span id={hintId}>{hint}</span> : null}
-      </div>
+      {showCount || hint ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-caption text-mute">
+          {showCount ? (
+            <span>
+              {count} {count === 1 ? "character" : "characters"}
+            </span>
+          ) : null}
+          {hint ? <span id={hintId}>{hint}</span> : null}
+        </div>
+      ) : null}
 
       {error ? (
         <p id={errorId} className="flex items-start gap-1.5 text-caption text-error">

@@ -12,6 +12,8 @@ import {
   getInstructionItemCounts,
   type InstructionItemCounts,
 } from "@/lib/instructions-server";
+import { TEXT_SUBMISSION_STATUSES } from "@/lib/plain-text";
+import { getPlainTextAdminStats } from "@/lib/plain-text-server";
 
 export const metadata: Metadata = {
   title: "Admin",
@@ -44,6 +46,7 @@ export default async function AdminPage() {
   const counts: InstructionItemCounts | null = await getInstructionItemCounts();
   const conversationCounts: ConversationItemCounts | null =
     await getConversationItemCounts();
+  const plainTextStats = await getPlainTextAdminStats();
 
   return (
     <>
@@ -182,6 +185,50 @@ export default async function AdminPage() {
               </p>
             </div>
           </div>
+        </Card>
+
+        <Card className="max-w-3xl">
+          <CardTitle>Plain text submissions</CardTitle>
+          <p className="mt-1 text-body-sm text-body">
+            Every plain text submission, by status, and the total characters
+            stored. A new submission starts as submitted.
+          </p>
+
+          {plainTextStats ? (
+            <>
+              <dl className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                {TEXT_SUBMISSION_STATUSES.map((status) => (
+                  <div key={status}>
+                    <dt className="text-caption capitalize text-mute">
+                      {status}
+                    </dt>
+                    <dd className="text-display-sm font-semibold text-ink">
+                      {plainTextStats[status]}
+                    </dd>
+                  </div>
+                ))}
+                <div>
+                  <dt className="text-caption text-mute">Total characters</dt>
+                  <dd className="text-display-sm font-semibold text-ink">
+                    {plainTextStats.characters.toLocaleString("en")}
+                  </dd>
+                </div>
+              </dl>
+
+              {plainTextStats.submitted +
+                plainTextStats.approved +
+                plainTextStats.rejected ===
+              0 ? (
+                <p className="mt-4 text-body-sm text-mute">
+                  No text has been submitted yet.
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="mt-4 text-body-sm text-error">
+              The counts could not be read. Reload the page in a moment.
+            </p>
+          )}
         </Card>
 
         <EmptyState title="Export and sync stay local" className="max-w-3xl">
