@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/page";
+import { ReportDialog } from "@/components/ui/report-dialog";
 import { KhowarField } from "@/components/khowar/KhowarField";
 import { cn } from "@/lib/cn";
 import {
@@ -476,8 +477,10 @@ export function InstructionsWorkspace({
         </form>
       )}
 
-      <IssueDialog
+      <ReportDialog
         open={reportOpen}
+        description="The report goes to the admins together with the English item. Your claim is released and the next item is loaded."
+        noteLabel="What is wrong with this item?"
         note={reportNote}
         error={reportError}
         pending={busy === "report"}
@@ -489,95 +492,3 @@ export function InstructionsWorkspace({
   );
 }
 
-function IssueDialog({
-  open,
-  note,
-  error,
-  pending,
-  onNoteChange,
-  onClose,
-  onSubmit,
-}: {
-  open: boolean;
-  note: string;
-  error: string | null;
-  pending: boolean;
-  onNoteChange: (note: string) => void;
-  onClose: () => void;
-  onSubmit: () => void;
-}) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const noteRef = useRef<HTMLTextAreaElement | null>(null);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (open && !dialog.open) {
-      dialog.showModal();
-      noteRef.current?.focus();
-    }
-    if (!open && dialog.open) dialog.close();
-  }, [open]);
-
-  return (
-    <dialog
-      ref={dialogRef}
-      aria-labelledby="report-issue-title"
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
-      }}
-      onClose={onClose}
-      className="fixed inset-0 m-auto h-fit w-[calc(100%-2rem)] max-w-md rounded-lg bg-surface p-6 text-ink shadow-elev-5 backdrop:bg-black/50"
-    >
-      <h2 id="report-issue-title" className="text-display-sm font-semibold">
-        Report an issue
-      </h2>
-      <p className="mt-2 text-body-sm text-body">
-        The report goes to the admins together with the English item. Your claim
-        is released and the next item is loaded.
-      </p>
-
-      <form
-        className="mt-4 flex flex-col gap-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit();
-        }}
-      >
-        <label htmlFor="report-note" className="text-body-sm font-medium text-ink">
-          What is wrong with this item?
-        </label>
-        <textarea
-          ref={noteRef}
-          id="report-note"
-          name="report-note"
-          rows={4}
-          value={note}
-          onChange={(event) => onNoteChange(event.target.value)}
-          aria-describedby={error ? "report-note-error" : undefined}
-          aria-invalid={error ? true : undefined}
-          className={cn(
-            "w-full resize-y rounded-md bg-surface px-3 py-2 text-body-sm text-ink",
-            "shadow-elev-1 outline-none",
-            "transition-colors duration-150 ease-[var(--ease-out-quart)]",
-            error && "ring-1 ring-error",
-          )}
-        />
-        {error ? (
-          <p id="report-note-error" className="text-caption text-error">
-            {error}
-          </p>
-        ) : null}
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onClose} disabled={pending}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={pending}>
-            {pending ? "Sending" : "Send report"}
-          </Button>
-        </div>
-      </form>
-    </dialog>
-  );
-}

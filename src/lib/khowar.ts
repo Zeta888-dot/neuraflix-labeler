@@ -245,3 +245,184 @@ export function validateInstructionTranslation(
 
   return { success: true, data: parsed.data, warnings };
 }
+
+/* ---------------------------------------------------------------------------
+ * Conversations (Phase L2). The English item is a list of turns and each turn
+ * gets its own Khowar translation, so the same text rules apply per turn and
+ * the structure rules keep the turns aligned with the English item.
+ * ------------------------------------------------------------------------ */
+
+export const conversationRoles = ["system", "user", "assistant"] as const;
+
+export type ConversationRole = (typeof conversationRoles)[number];
+
+export type ConversationTurn = {
+  role: ConversationRole;
+  content: string;
+};
+
+/** The English side of one conversation item, as stored in the jsonb payload. */
+export type ConversationSource = { turns: ConversationTurn[] };
+
+export function isConversationRole(value: unknown): value is ConversationRole {
+  return (
+    typeof value === "string" &&
+    (conversationRoles as readonly string[]).includes(value)
+  );
+}
+
+/** Per turn limit, mirrored by submit_conversation_translation in 0004. */
+export const MAX_TURN_CHARS = 4000;
+
+/**
+ * The string hashed into conversation_items.english_hash: role and content per
+ * turn, joined with a blank line. Mirrored by the backfill in
+ * supabase/migrations/0004_conversations.sql.
+ */
+export function conversationHashSource(turns: ConversationTurn[]): string {
+  return turns
+    .map(
+      (turn) =>
+        `${normalizeWhitespace(turn.role)}\n${normalizeWhitespace(turn.content)}`,
+    )
+    .join("\n\n");
+}
+
+/** One Khowar field per English turn, in the English order. */
+export type ConversationTranslationValues = {
+  turns: ConversationTurn[];
+};
+
+export function emptyConversationValues(
+  source: ConversationSource,
+): ConversationTranslationValues {
+  return {
+    turns: source.turns.map((turn) => ({ role: turn.role, content: "" })),
+  };
+}
+
+export function hasConversationText(
+  values: ConversationTranslationValues,
+): boolean {
+  return values.turns.some((turn) => turn.content.trim() !== "");
+}
+
+/** Index of the first turn with no text yet, or null when all are filled. */
+export function firstEmptyTurn(
+  values: ConversationTranslationValues,
+): number | null {
+  const index = values.turns.findIndex((turn) => turn.content.trim() === "");
+  return index === -1 ? null : index;
+}
+
+/** Messages keyed by turn index, plus one slot for a whole-conversation error. */
+export type ConversationFieldErrors = {
+  form: string | null;
+  turns: Record<number, string>;
+};
+
+const conversationTurnSchema = z.object({
+  role: z.enum(conversationRoles),
+  content: z
+    .string()
+    .max(MAX_TURN_CHARS, `Keep each turn under ${MAX_TURN_CHARS} characters`),
+});
+
+/**
+ * The conversation translation schema: the turns must keep the English count
+ * and order, and every content follows the same script rules as the instruction
+ * fields. The length ratio stays a warning, not a blocking error.
+ */
+export function conversationTranslationSchema(source: ConversationSource) {
+  return z
+    .object({ turns: z.array(conversationTurnSchema) })
+    .superRefine((values, ctx) => {
+      if (values.turns.length !== source.turns.length) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["turns"],
+          message: `This conversation has ${source.turns.length} turns. Reload the item before submitting.`,
+        });
+        return;
+      }
+
+      values.turns.forEach((turn, index) => {
+        const english = source.turns[index];
+        if (turn.role !== english.role) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["turns", index, "content"],
+            message: "The turn order changed. Reload the item before submitting.",
+          });
+          return;
+        }
+
+        const error = khowarTextError(turn.content, english.content);
+        if (error) {
+          ctx.addIssue({ code: "custom", path: ["turns", index, "content"], message: error });
+        }
+      });
+    });
+}
+
+/** Per-turn length-ratio warnings, keyed by turn index. */
+export function conversationTurnWarnings(
+  source: ConversationSource,
+  values: ConversationTranslationValues,
+): Record<number, string> {
+  const warnings: Record<number, string> = {};
+
+  values.turns.forEach((turn, index) => {
+    const english = source.turns[index];
+    if (!english) return;
+    const warning = khowarLengthWarning(
+      turn.content,
+      english.content,
+      `text of turn ${index + 1}`,
+    );
+    if (warning) warnings[index] = warning;
+  });
+
+  return warnings;
+}
+
+export function conversationWarnings(
+  source: ConversationSource,
+  values: ConversationTranslationValues,
+): string[] {
+  return Object.values(conversationTurnWarnings(source, values));
+}
+
+export type ConversationValidation =
+  | {
+      success: true;
+      data: ConversationTranslationValues;
+      warnings: string[];
+    }
+  | { success: false; errors: ConversationFieldErrors; warnings: string[] };
+
+/** One call the client and the server both use. */
+export function validateConversationTranslation(
+  source: ConversationSource,
+  values: ConversationTranslationValues,
+): ConversationValidation {
+  const parsed = conversationTranslationSchema(source).safeParse(values);
+  const warnings = conversationWarnings(source, values);
+
+  if (!parsed.success) {
+    const errors: ConversationFieldErrors = { form: null, turns: {} };
+
+    for (const issue of parsed.error.issues) {
+      const index = issue.path[0] === "turns" ? issue.path[1] : undefined;
+      if (typeof index === "number") {
+        if (!errors.turns[index]) errors.turns[index] = issue.message;
+      } else if (!errors.form) {
+        errors.form = issue.message;
+      }
+    }
+
+    return { success: false, errors, warnings };
+  }
+
+  return { success: true, data: parsed.data, warnings };
+}

@@ -19,6 +19,7 @@ import {
   validateInstructionTranslation,
   type EnglishSource,
 } from "@/lib/khowar";
+import { logRpcError } from "@/lib/rpc-log";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -27,23 +28,6 @@ import { createClient } from "@/lib/supabase/server";
  */
 
 type Db = Awaited<ReturnType<typeof createClient>>;
-
-type RpcErrorFields = {
-  message: string;
-  code?: string | null;
-  details?: string | null;
-  hint?: string | null;
-};
-
-/** Postgres error fields only: never the payload, the session or the row. */
-function logRpcError(prefix: string, error: RpcErrorFields): void {
-  console.error(prefix, {
-    message: error.message,
-    code: error.code ?? null,
-    details: error.details ?? null,
-    hint: error.hint ?? null,
-  });
-}
 
 async function requireUserId(): Promise<string> {
   const user = await getSessionUser();
