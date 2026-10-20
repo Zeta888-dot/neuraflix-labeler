@@ -1,94 +1,103 @@
 # Handoff
 
-Status: L0 to L4 and the L5 review and admin code are complete. 0007 has not been run against Supabase. L6 has not been started.
+Status: L0 to L6 code is implemented, with L6 added as local export, sync and purge scripts. 0007 still has to be run against Supabase before Review and Admin work. No L7 work has started.
 
 ## How to run
 
 1. `npm install`
-2. Copy `.env.example` to `.env.local` and fill in the four values. The service role key is read only by local scripts under `scripts/`, never by app code, and is never logged.
+2. Copy `.env.example` to `.env.local` and fill in the four names. `SUPABASE_SERVICE_ROLE_KEY` is read only by `scripts/` and is never imported by `src/` or logged.
 3. `npm run dev`, then open http://localhost:3000
-4. `npm run test:core`, `npm run lint` and `npm run build` pass.
+4. `npm run test:core`, `npm run test:export`, `npm run lint` and `npm run build`.
+
+Environment variable names only: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OCR_STORAGE_QUOTA_MB`.
 
 ## Supabase setup (once, in order)
 
-1. Project settings, API: copy the project URL, the anon key and the service role key into `.env.local`.
-2. Authentication: keep the email magic link, and add `/auth/callback` for the local and deployed origins.
-3. SQL Editor: run `supabase/migrations/` 0001 to 0007 in order. 0006 added OCR upload and quota. 0007 is new for L5.
-4. Make yourself the first admin with the UPDATE statement in 0001's header comment, using your email.
-5. Later role changes use the Admin page, or SQL:
+1. Project settings, API: copy the project URL, anon key and service role key into `.env.local`.
+2. Authentication: keep the email magic link and add `/auth/callback` for the local and deployed origins.
+3. SQL Editor: run `supabase/migrations/` 0001 to 0007 in order. L6 needs no new migration because `exported_at` and `purged_at` already exist.
+4. Make the first admin with the UPDATE statement in 0001's header comment.
+5. Later role changes use Admin, Users, or SQL:
 
 ```sql
-update public.profiles p
-   set role = 'reviewer'
-  from auth.users u
- where u.id = p.id
-   and u.email = 'person@example.com';
+update public.profiles p set role = 'reviewer'
+  from auth.users u where u.id = p.id and u.email = 'person@example.com';
 ```
 
-## Phase L5: apply it in this order
+## L6 commands
 
-1. Run `supabase/migrations/0007_review.sql` after 0006. Do not edit 0001 to 0006.
-2. In Table Editor, confirm the new `reviewed_at`, `reviewer_edited` and `original_content` columns, `review_log`, and `app_settings.allow_self_review = false`.
-3. Run `npm run test:core`, then `npm run lint` and `npm run build`.
-4. Sign in as a reviewer or admin and open Review. The four queue counts come from `review_counts()`.
-5. Work through the browser checks at the end of this file.
+- `npm run export` writes a new snapshot. Options: `--out path`, `--data path`, `--dry-run`, `--no-latest`.
+- `npm run sync` is a dry run. `npm run sync -- --commit` downloads missing approved OCR images. Options: `--data path`, `--page uuid`.
+- `npm run purge:ocr` is a dry run. `npm run purge:ocr -- --commit` deletes remote OCR images. Options: `--data path`, `--page uuid`.
+- Defaults are `exports/<UTC timestamp>/` and `data/ocr`. A custom `--out` that already exists is refused.
+- `exports/latest` is a junction on Windows and a directory link elsewhere. A real directory named latest is never removed; the export succeeds with a warning.
 
-## What 0007 changes
+## Output structure
 
-- Review fields on instruction, conversation and text translations, `reviewed_at` on OCR pages, and `reviewer_edited` plus `original_label` on OCR lines.
-- `review_log` is append-only. Staff can read it; only the security definer review functions write it.
-- `app_settings.allow_self_review` is seeded `false`. The page learns the setting through `review_counts()`, so normal users still cannot read that row.
-- `review_next`, `review_counts`, `review_instruction`, `review_conversation`, `review_text` and `review_ocr_page` check the caller's role by reading `profiles`.
-- `admin_overview`, `admin_list_users` and `admin_set_role` check for the admin role. `admin_set_role` refuses a self change and refuses to remove the last admin.
-- `my_feedback` returns rejected or reviewer-edited contributions for the signed-in contributor.
-- Every function uses `p_` parameters, `out_` output columns, alias-qualified columns, `search_path = public`, and security definer. Execute is granted to authenticated only. `recompute_item_status` stays internal.
-
-## Review page
-
-- Four queues: Instructions, Conversations, Plain text and OCR pages, oldest first. Counts refresh after every decision and queue switch.
-- Instructions and conversations show English and Khowar side by side. Plain text shows details and the Khowar editor. OCR shows each signed line image with a one hour URL.
-- Approve, edit and approve, or reject. Reject needs a note of at least 3 characters; the dialog offers quick reason chips that append to the note.
-- Automatic checks are non-blocking: script ratio, copied English, length ratio, short text, Latin letters and repeated characters.
-- OCR images can be zoomed, a line can be removed, and a failed image can be signed again with Retry image. At least one line must stay.
-- Keyboard: A approves, R opens reject, 1 to 4 switch queues. The self review notice appears when the setting is on.
-- There is no undo. A review decision is final; the next item loads immediately.
-- `ALREADY_REVIEWED` shows "Someone else already reviewed this item. Loading the next one." and loads the next item.
-- `SELF_REVIEW` shows "You cannot review your own contribution."
-
-## Admin page
-
-- Overview reads `admin_overview()` and shows contribution totals, OCR lines, accounts by role and contributors active in the last 30 days.
-- Users reads `admin_list_users()` and shows every account, its role, consent date and contribution counts.
-- A role selector opens a confirmation dialog. Your own row has no selector and says "You cannot change your own role."
-- The existing import commands, status cards, storage meter and sync text are unchanged.
-
-## Dashboard feedback
-
-- A Reviewer feedback card reads `my_feedback(10)`: rejected or reviewer-edited contributions, newest first, with the reviewer note and date.
-- My pages and Plain text already show reviewer notes on rejected work.
-
-## Self-review testing
-
-```sql
-update public.app_settings
-   set value = 'true', updated_at = now()
- where key = 'allow_self_review';
+```text
+exports/<timestamp>/
+  manifest.json
+  contributors.csv
+  cpt/ train.jsonl, val.jsonl
+  sft/ train.jsonl, val.jsonl
+  sft_multiturn/ train.jsonl, val.jsonl
+  parallel/ train.jsonl, val.jsonl
+  ocr/ train.jsonl, val.jsonl, train.txt, val.txt, charset.json, manifest.json
+  ocr/images/<page_uuid>_<NN>.<webp|jpg>
+data/ocr/<page_uuid>/line_<NN>.<webp|jpg>
+data/ocr/<page_uuid>/manifest.json
 ```
 
-Turn it off with the same statement and `'false'`. The Review page then hides your own submissions again.
+A split file is created only when that split has rows. `manifest.json` is written last, so a directory without it is incomplete and must not be treated as an export. No manifest stores labels or names. `contributors.csv` has `contributor_id,instruction_translations,conversation_translations,text_submissions,ocr_lines` and pseudonymous ids only.
 
-## L6 scope (not started)
+## Export schemas
 
-Export and sync scripts, deterministic train and validation splits, manifest and contributors CSV, storage purge after export, and quota cleanup for failed or abandoned pages. `npm run sync` remains copyable text marked "Available in a later update".
+- `cpt`: `{"id","source","text"}`, where source is `instruction`, `input`, `response` or `text`.
+- `sft`: `{"id":"instruction:<translation_uuid>","messages":[{"role":"user","content":"...\n\n<input when present>"},{"role":"assistant","content":"..."}]}`.
+- `sft_multiturn`: `{"id":"conversation:<translation_uuid>","messages":[{"role":"system|user|assistant","content":"..."}]}` in original turn order.
+- `parallel`: `{"id","type":"instruction|input|response|turn","en","khw"}`. Conversation turn ids include the one based turn position.
+- `ocr/train.jsonl` and `val.jsonl`: `{"id":"<page_uuid>_<NN>","messages":[{"role":"<|User|>","content":"<image>\nFree OCR. ","images":["images/<page_uuid>_<NN>.<ext>"]},{"role":"<|Assistant|>","content":"<label>"}]}`.
+- `ocr/train.txt` and `val.txt`: `images/<page_uuid>_<NN>.<ext><TAB><label>`.
+- `ocr/charset.json`: frequency sorted `{"char","code","count"}` entries.
+- `ocr/manifest.json`: `schemaVersion`, `createdAt`, prompt, counts and rows with `id`, `pageId`, `lineId`, `line`, `image`, `split`, `bytes`, `width`, `height`, `sha256`.
+- Top `manifest.json`: schema, `createdAt`, normalization rules, split method, `ocrPrompt`, `valRatio`, real counts and warnings.
+- The full page image is never read or exported.
 
-## Browser checks
+## Selection and splits
 
-1. Apply 0007, then sign in as an admin. Admin should show Overview and Users with real numbers and no invented rows.
-2. Make a second account a reviewer through Users. Confirm the dialog names the old and new role. Try to change your own role: no selector appears, and the message is clear.
-3. As a contributor, submit one instruction, one conversation, one plain text and one OCR page.
-4. As the reviewer, open Review. Check all four counts, then approve the instruction, conversation and plain text without edits.
-5. On the OCR page, zoom a line, edit one label, remove one line, approve. Check that My pages shows the approved page and the kept line count.
-6. Submit another item and reject it with a reason chip plus a note. Check the contributor Dashboard feedback card, My pages and Plain text notes.
-7. Open Review in two tabs. Decide the same item in both: the second tab shows the exact ALREADY_REVIEWED message and loads the next item.
-8. Turn self review on with the SQL above. The notice appears and your own item can be reviewed. Turn it off.
-9. Check 360 px and 1440 px, both themes, keyboard only including A, R and 1 to 4, and a screen reader. Confirm the empty state says "Nothing to review right now", and every action target is at least 44 px.
+- Text export includes rows whose final status is exactly `approved`. Draft, submitted, rejected, incomplete and unreviewed rows are excluded.
+- OCR export requires both the OCR line and its page to be `approved`. A line that is approved under a non-approved page is excluded.
+- Export is a fresh snapshot and does not require `exported_at`; it never changes text status. OCR images must already exist in `data/ocr` and pass manifest, type, size, dimension and sha256 checks, so run sync first when OCR is approved.
+- Normalization: NFC, U+064A and U+0649 to U+06CC, U+0643 to U+06A9, controls and invisible marks removed, ZWNJ kept, whitespace collapsed. Paragraph breaks stay in plain text.
+- Splits use SHA-1 of the source item id, val when the value is below 0.05. Records from one source item stay together. OCR groups by page id and falls back to line id at 20 or more lines. If either side would be empty, all rows stay in train. Output order is sorted by id.
+- A malformed approved row stops the export instead of silently dropping data.
+
+## Sync, resume and purge
+
+- Sync validates each storage path as `<contributor_uuid>/<page_uuid>/<line>.<webp|jpg>` and ties it to the database page, line and page contributor. Remote names are never used as local names.
+- Sync downloads only approved page and line images. It checks image header, type, byte count and dimensions against the row, then writes a temporary file, fsyncs it and hard links it into place. An existing file is never replaced. A bad or mismatched local file is reported and left untouched.
+- The page manifest is written before `exported_at` is marked. A crash at any point is safe to retry. Leftover temporary files older than one hour are removed; they are never treated as images.
+- `exported_at` means a local image passed the sync checks: the expected path, type, byte count and dimensions match the row, and the file is recorded in the page manifest with its sha256. It does not mean a remote purge is safe by itself.
+- Purge is never automatic. It requires an approved line and page, `exported_at` set, a valid manifest entry, and a readable local file whose type, dimensions, byte count and sha256 all match. Only then does it delete the Storage object and set `purged_at`. The local file remains. The remote copy cannot be recovered after a purge, so keep the `data/ocr` directory backed up if another export may be needed.
+- If a purge deletes the remote object but the database update fails, running purge again verifies the local file, sees the object is already gone, and sets `purged_at`. If any local check fails, the remote object is left intact.
+- Sync and purge are idempotent. Use `--page uuid` to work one page at a time.
+
+## Recovery
+
+- A partial export has no top `manifest.json`; `exports/latest` still points at the previous complete export. Nothing is overwritten. Delete the partial directory manually after checking it.
+- If export fails because OCR images are missing, run `npm run sync -- --commit` and retry.
+- If sync reports a mismatched local file, move that file aside manually, then rerun. The scripts do not replace or delete it for you.
+- If a local manifest is unreadable, sync and purge stop for that page and leave everything in place.
+
+## Verification
+
+1. Apply 0007, sign in as a reviewer, and approve at least one instruction, conversation, plain text and OCR page.
+2. Run `npm run sync`, then `npm run sync -- --commit`. Check `data/ocr/<page_uuid>/manifest.json` and the line files.
+3. Run `npm run export -- --dry-run`, then `npm run export`. Check the timestamp directory, top manifest, every schema, `ocr/images` and `exports/latest`.
+4. Run `npm run purge:ocr`. It must only list files, not delete. Then run `npm run purge:ocr -- --commit` and confirm `ocr_lines.purged_at` is set while the local images remain.
+5. Run `npm run test:core`, `npm run test:export`, `npm run lint` and `npm run build`.
+6. Earlier L5 checks still apply: Admin Overview and Users, role changes, all four review queues, OCR zoom and line removal, rejection feedback, ALREADY_REVIEWED, self review SQL, 360 px and 1440 px, both themes, keyboard A, R and 1 to 4.
+
+## L5 reference
+
+`review_counts()` drives the four queues. Reject needs a note of at least 3 characters. `ALREADY_REVIEWED` shows "Someone else already reviewed this item. Loading the next one." and `SELF_REVIEW` shows "You cannot review your own contribution." Self review is toggled with `update public.app_settings set value = 'true', updated_at = now() where key = 'allow_self_review';` and the same statement with `'false'`.

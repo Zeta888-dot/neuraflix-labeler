@@ -13,6 +13,10 @@
 # testing
 /coverage
 
+# local datasets and exports
+/exports/
+/data/
+
 # next.js
 /.next/
 /out/

@@ -47,7 +47,9 @@ const CONVERSATION_IMPORT_USAGE =
 const CONVERSATION_JSONL_EXAMPLE =
   '{"turns":[{"role":"user","content":"Where can I buy a bus ticket?"},{"role":"assistant","content":"You can buy one at the station counter or on the bus from the driver."}]}';
 
+const EXPORT_COMMAND = "npm run export";
 const SYNC_COMMAND = "npm run sync";
+const PURGE_COMMAND = "npm run purge:ocr";
 
 const megabytes = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
 
@@ -58,7 +60,7 @@ export default function AdminPage() {
     <>
       <PageHeader
         title="Admin"
-        description="Admin only. Counts come from the database and the import runs as a local script."
+        description="Admin only. Counts come from the database and imports and exports run as local scripts."
       />
       <Suspense fallback={<AdminSkeleton />}>
         <AdminLoader />
@@ -323,30 +325,71 @@ async function AdminLoader() {
       <OcrStorageCard storage={ocrStorage} />
 
       <Card className="max-w-3xl">
-        <CardTitle>Sync reviewed OCR output</CardTitle>
+        <CardTitle>Export and OCR image sync</CardTitle>
         <p className="mt-1 text-body-sm text-body">
-          This command is not part of the app. It will run locally under
-          scripts/ with the service role key, never from this page.
+          These commands run locally under scripts/ with the service role key.
+          They never run from this page.
         </p>
-        <div className="mt-4 flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2">
-          <code className="min-w-0 flex-1 break-all font-mono text-caption text-ink">
-            {SYNC_COMMAND}
-          </code>
-          <CopyButton
-            value={SYNC_COMMAND}
-            label="Copy the sync command"
-            className="-my-1 shrink-0"
-          />
+        <div className="mt-4 space-y-4">
+          <div>
+            <div className="flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2">
+              <code className="min-w-0 flex-1 break-all font-mono text-caption text-ink">
+                {EXPORT_COMMAND}
+              </code>
+              <CopyButton
+                value={EXPORT_COMMAND}
+                label="Copy the export command"
+                className="-my-1 shrink-0"
+              />
+            </div>
+            <p className="mt-1 text-caption text-mute">
+              Writes exports/&lt;timestamp&gt;/ and updates exports/latest.
+              Existing output paths are refused.
+            </p>
+          </div>
+          <div>
+            <div className="flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2">
+              <code className="min-w-0 flex-1 break-all font-mono text-caption text-ink">
+                {SYNC_COMMAND}
+              </code>
+              <CopyButton
+                value={SYNC_COMMAND}
+                label="Copy the sync command"
+                className="-my-1 shrink-0"
+              />
+            </div>
+            <p className="mt-1 text-caption text-mute">
+              Dry run by default. Add{" "}
+              <code className="font-mono text-ink">-- --commit</code> to download
+              approved line images into data/ocr. Run sync before export when
+              OCR pages are approved.
+            </p>
+          </div>
+          <div>
+            <div className="flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2">
+              <code className="min-w-0 flex-1 break-all font-mono text-caption text-ink">
+                {PURGE_COMMAND}
+              </code>
+              <CopyButton
+                value={PURGE_COMMAND}
+                label="Copy the purge command"
+                className="-my-1 shrink-0"
+              />
+            </div>
+            <p className="mt-1 text-caption text-mute">
+              Dry run by default. Add{" "}
+              <code className="font-mono text-ink">-- --commit</code> to delete
+              remote images only after the local checks pass. Purge is never
+              part of export.
+            </p>
+          </div>
         </div>
-        <p className="mt-2 text-caption text-mute">
-          Available in a later update.
-        </p>
       </Card>
 
-      <EmptyState title="Export and sync stay local" className="max-w-3xl">
+      <EmptyState title="Approved data only" className="max-w-3xl">
         <p>
-          They run as scripts under scripts/ with the service role key, never
-          from this page.
+          Export reads approved rows only. Sync and purge never run from this
+          page.
         </p>
       </EmptyState>
     </div>
