@@ -1,68 +1,94 @@
 # Handoff
 
-Status: L0 to L3 and OCR L4a, L4b, L4c are complete. L5 has not been started. 0006 has not been run against Supabase.
+Status: L0 to L4 and the L5 review and admin code are complete. 0007 has not been run against Supabase. L6 has not been started.
 
 ## How to run
 
 1. `npm install`
 2. Copy `.env.example` to `.env.local` and fill in the four values. The service role key is read only by local scripts under `scripts/`, never by app code, and is never logged.
 3. `npm run dev`, then open http://localhost:3000
-4. `npm run test:ocr`, `npm run lint` and `npm run build` pass.
+4. `npm run test:core`, `npm run lint` and `npm run build` pass.
 
 ## Supabase setup (once, in order)
 
 1. Project settings, API: copy the project URL, the anon key and the service role key into `.env.local`.
 2. Authentication: keep the email magic link, and add `/auth/callback` for the local and deployed origins.
-3. SQL Editor: run `supabase/migrations/` 0001 to 0006 in order. 0006 is new for L4c.
+3. SQL Editor: run `supabase/migrations/` 0001 to 0007 in order. 0006 added OCR upload and quota. 0007 is new for L5.
 4. Make yourself the first admin with the UPDATE statement in 0001's header comment, using your email.
+5. Later role changes use the Admin page, or SQL:
 
-## Phase L4c: apply it in this order
+```sql
+update public.profiles p
+   set role = 'reviewer'
+  from auth.users u
+ where u.id = p.id
+   and u.email = 'person@example.com';
+```
 
-1. Run `supabase/migrations/0006_ocr.sql` in the SQL Editor. Do not edit 0001 to 0005.
-2. In Storage, open the `ocr-lines` bucket and confirm it is private, has a 2 MB file size limit, and allows `image/webp` and `image/jpeg`.
-3. Run `npm run test:ocr`, then `npm run lint` and `npm run build`.
-4. In the dashboard, check Storage has uploaded line images under `<user id>/<page id>/<idx>.<webp|jpg>`, and Table Editor shows `app_settings` with `ocr_quota_mb = 400`, the new `ocr_pages` columns `reviewer_id` and `review_note`, and the new `ocr_lines` checks.
+## Phase L5: apply it in this order
 
-## What 0006 changes
+1. Run `supabase/migrations/0007_review.sql` after 0006. Do not edit 0001 to 0006.
+2. In Table Editor, confirm the new `reviewed_at`, `reviewer_edited` and `original_content` columns, `review_log`, and `app_settings.allow_self_review = false`.
+3. Run `npm run test:core`, then `npm run lint` and `npm run build`.
+4. Sign in as a reviewer or admin and open Review. The four queue counts come from `review_counts()`.
+5. Work through the browser checks at the end of this file.
 
-- `app_settings` stores the OCR quota. The row `ocr_quota_mb = 400` is seeded and is readable only for that key. API writes are revoked.
-- `ocr_pages` statuses become uploading, submitted, approved, rejected, failed. Existing draft rows become failed. Page checks: line_count 1 to 40, rights_confirmed true, label at most 120 characters. Reviewer fields are added.
-- `ocr_lines` checks: idx 1 to 40, trimmed label 1 to 400 characters, bytes 1 to 2,000,000, positive width and height.
-- The private `ocr-lines` bucket gets the 2 MB cap and the WebP and JPEG MIME types. The 0001 storage policies are left in place and not duplicated.
-- Contributors lose direct insert, update and delete on `ocr_pages` and `ocr_lines`. Reads stay under the 0001 RLS policies. L5 will add review grants and policies.
-- Functions: `ocr_storage_status()`, `ocr_create_page(p_label, p_rights, p_line_count, p_total_bytes)`, `ocr_finalize_page(p_page_id, p_lines)` and `ocr_abort_page(p_page_id)`. All are security definer with `search_path = public`, use `p_` parameters, qualify columns through aliases, and execute only for authenticated.
+## What 0007 changes
 
-## Quota deviation from LABELER.md
+- Review fields on instruction, conversation and text translations, `reviewed_at` on OCR pages, and `reviewer_edited` plus `original_label` on OCR lines.
+- `review_log` is append-only. Staff can read it; only the security definer review functions write it.
+- `app_settings.allow_self_review` is seeded `false`. The page learns the setting through `review_counts()`, so normal users still cannot read that row.
+- `review_next`, `review_counts`, `review_instruction`, `review_conversation`, `review_text` and `review_ocr_page` check the caller's role by reading `profiles`.
+- `admin_overview`, `admin_list_users` and `admin_set_role` check for the admin role. `admin_set_role` refuses a self change and refuses to remove the last admin.
+- `my_feedback` returns rejected or reviewer-edited contributions for the signed-in contributor.
+- Every function uses `p_` parameters, `out_` output columns, alias-qualified columns, `search_path = public`, and security definer. Execute is granted to authenticated only. `recompute_item_status` stays internal.
 
-The brief planned an environment variable for the OCR quota. That cannot guard `ocr_create_page`, because a signed-in user can call the function directly and an environment variable is not visible inside Postgres. The quota therefore lives in `app_settings.ocr_quota_mb`, seeded at 400 MB. Admins change it with SQL. The client warns at 60 percent, blocks new uploads above 80 percent, and the server enforces the same 80 percent threshold. Other modules keep working.
+## Review page
 
-## Submission flow and schema
+- Four queues: Instructions, Conversations, Plain text and OCR pages, oldest first. Counts refresh after every decision and queue switch.
+- Instructions and conversations show English and Khowar side by side. Plain text shows details and the Khowar editor. OCR shows each signed line image with a one hour URL.
+- Approve, edit and approve, or reject. Reject needs a note of at least 3 characters; the dialog offers quick reason chips that append to the note.
+- Automatic checks are non-blocking: script ratio, copied English, length ratio, short text, Latin letters and repeated characters.
+- OCR images can be zoomed, a line can be removed, and a failed image can be signed again with Retry image. At least one line must stay.
+- Keyboard: A approves, R opens reject, 1 to 4 switch queues. The self review notice appears when the setting is on.
+- There is no undo. A review decision is final; the next item loads immediately.
+- `ALREADY_REVIEWED` shows "Someone else already reviewed this item. Loading the next one." and loads the next item.
+- `SELF_REVIEW` shows "You cannot review your own contribution."
 
-- Step 4 is active. The contributor sees the page label, line counts, unreadable count and rights state, then confirms in a dialog. The original page image is never uploaded.
-- Each line is cropped at working resolution, converted to grayscale, encoded as WebP quality 0.90, and falls back to JPEG quality 0.92 when the browser does not really return WebP. The real blob type is stored. A line above 2 MB fails with a clear message.
-- Prepare runs first so the total encoded bytes are known. Then `ocr_create_page` reserves the row, then up to 3 line images upload at once with 3 retries and exponential backoff. Stop upload keeps the page and uploaded line numbers. Cancel submission calls `ocr_abort_page` and returns to labeling. A beforeunload warning runs during an upload.
-- The IndexedDB draft schema stays at version 1. It gains `submission: { pageId, uploadedIdx } | null`; old records default to null. No encoded blobs are stored. A reload re-encodes the lines from the original page and uploads only the missing line numbers with upsert.
-- `npm run test:ocr` covers the plan, extension, quota and submit gate helpers in `src/lib/ocr/submit.ts`. `encodeLine` is in `src/lib/ocr/encode.ts`.
-- On success the draft is deleted, the workspace shows "Page submitted. N lines uploaded.", My pages refreshes, and the success card offers another page. The server re-validates every label and path.
+## Admin page
 
-## Error messages
+- Overview reads `admin_overview()` and shows contribution totals, OCR lines, accounts by role and contributors active in the last 30 days.
+- Users reads `admin_list_users()` and shows every account, its role, consent date and contribution counts.
+- A role selector opens a confirmation dialog. Your own row has no selector and says "You cannot change your own role."
+- The existing import commands, status cards, storage meter and sync text are unchanged.
 
-- Storage above 80 percent: "OCR uploads are full for now. Plain text, instructions and conversations are still open."
-- Rate limit, 20 pages in 24 hours: "You have reached today's page limit. Please come back tomorrow."
-- Rights, session and not-editable errors have their own messages in `src/app/(app)/ocr/actions.ts`. Submit errors log only the message and code with the `[ocr_submit]` prefix.
-- My pages shows newest first, 20 at a time with Load more. Pages without a label show "Untitled page". Uploading pages show the Incomplete badge. Rejected pages show the reviewer note. There is no edit or delete action and the empty state is honest.
-- Dashboard adds OCR pages by status and total uploaded lines. Admin adds page and line counts by status, a storage meter with used MB, quota MB and percentage, and `npm run sync` as copyable text marked "Available in a later update".
+## Dashboard feedback
 
-## L5 scope (not started)
+- A Reviewer feedback card reads `my_feedback(10)`: rejected or reviewer-edited contributions, newest first, with the reviewer note and date.
+- My pages and Plain text already show reviewer notes on rejected work.
 
-Review actions for OCR pages and lines, approve and reject with a reviewer note, signed URLs for reviewers, export and sync through `npm run sync`, storage purge after export, and quota cleanup for failed or abandoned pages.
+## Self-review testing
+
+```sql
+update public.app_settings
+   set value = 'true', updated_at = now()
+ where key = 'allow_self_review';
+```
+
+Turn it off with the same statement and `'false'`. The Review page then hides your own submissions again.
+
+## L6 scope (not started)
+
+Export and sync scripts, deterministic train and validation splits, manifest and contributors CSV, storage purge after export, and quota cleanup for failed or abandoned pages. `npm run sync` remains copyable text marked "Available in a later update".
 
 ## Browser checks
 
-Apply 0006 first. Submit a page from step 4: the confirm dialog names the line count, progress moves through preparing, creating and uploading, and the success card shows "Page submitted. N lines uploaded." My pages, Dashboard and Admin update after the refresh, and the Storage folder holds only line images, never the page.
-
-Reload during an upload: the resume card offers "Resume upload" and only missing lines are sent. Stop upload shows the interrupted card with the uploaded count. Cancel submission closes the page and returns to labeling with the labels intact. Check that an unfinished page is never counted as Submitted.
-
-Check the 60 and 80 percent states on a local project by changing `app_settings.ocr_quota_mb`. The warning appears at 60, the submit button is blocked above 80, and the exact full message appears. Confirm plain text, instructions and conversations still work.
-
-Check My pages empty state, 20 items plus Load more, the Incomplete badge for an interrupted page, and a rejected page with a note once L5 can set one. Check Dashboard and Admin zero states, then real counts. Check the storage meter arithmetic and the 360 px and 1440 px layouts, both themes, keyboard only and a screen reader.
+1. Apply 0007, then sign in as an admin. Admin should show Overview and Users with real numbers and no invented rows.
+2. Make a second account a reviewer through Users. Confirm the dialog names the old and new role. Try to change your own role: no selector appears, and the message is clear.
+3. As a contributor, submit one instruction, one conversation, one plain text and one OCR page.
+4. As the reviewer, open Review. Check all four counts, then approve the instruction, conversation and plain text without edits.
+5. On the OCR page, zoom a line, edit one label, remove one line, approve. Check that My pages shows the approved page and the kept line count.
+6. Submit another item and reject it with a reason chip plus a note. Check the contributor Dashboard feedback card, My pages and Plain text notes.
+7. Open Review in two tabs. Decide the same item in both: the second tab shows the exact ALREADY_REVIEWED message and loads the next item.
+8. Turn self review on with the SQL above. The notice appears and your own item can be reviewed. Turn it off.
+9. Check 360 px and 1440 px, both themes, keyboard only including A, R and 1 to 4, and a screen reader. Confirm the empty state says "Nothing to review right now", and every action target is at least 44 px.

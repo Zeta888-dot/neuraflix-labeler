@@ -1,7 +1,8 @@
 /**
- * One place that writes a failed RPC call to the server log. Only the four
- * Postgres error fields are logged: never the payload, the session, keys or
- * cookies. The prefix names the call, for example [claim_conversation].
+ * One place that writes a failed RPC call to the server log. Only the message
+ * and the code are logged: never details, hints, the payload, the session,
+ * keys, cookies, text content or image data. The prefix names the call, for
+ * example [review_decision].
  */
 
 export type RpcErrorFields = {
@@ -15,7 +16,5 @@ export function logRpcError(prefix: string, error: RpcErrorFields): void {
   console.error(prefix, {
     message: error.message,
     code: error.code ?? null,
-    details: error.details ?? null,
-    hint: error.hint ?? null,
   });
 }

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:ocr": "node --import tsx --test src/lib/ocr/segment-core.test.ts src/lib/ocr/labels.test.ts src/lib/ocr/bitmap.test.ts src/lib/ocr/submit.test.ts",
+    "test:core": "node --import tsx --test src/lib/khowar.test.ts src/lib/review.test.ts src/lib/ocr/segment-core.test.ts src/lib/ocr/labels.test.ts src/lib/ocr/bitmap.test.ts src/lib/ocr/submit.test.ts",
     "import:english": "node --env-file=.env.local --import tsx scripts/import-english.ts",
     "import:conversations": "node --env-file=.env.local --import tsx scripts/import-conversations.ts"
   },

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
 import { buttonClasses } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { EmptyState, PageHeader } from "@/components/ui/page";
@@ -13,6 +14,8 @@ import {
   type OcrCounts,
 } from "@/lib/ocr/pages";
 import { getPlainTextCounts } from "@/lib/plain-text-server";
+import { getMyFeedback } from "@/lib/review-server";
+import type { FeedbackItem } from "@/lib/review";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -31,11 +34,13 @@ export default async function DashboardPage() {
     conversationCounts,
     plainTextCounts,
     ocrCounts,
+    feedback,
   ] = await Promise.all([
     getInstructionCounts(user.id),
     getConversationCounts(user.id),
     getPlainTextCounts(user.id),
     getOcrCounts(user.id),
+    getMyFeedback(10),
   ]);
 
   const instructionTotal = instructionCounts
@@ -150,6 +155,7 @@ export default async function DashboardPage() {
             emptyNote="No plain text submitted yet."
           />
           <OcrCountsCard counts={ocrCounts} total={ocrTotal} />
+          <FeedbackCard feedback={feedback} />
         </div>
       )}
     </>
@@ -208,6 +214,67 @@ function CountsCard({
       <Link href={href} className={buttonClasses({ size: "sm" }) + " mt-6"}>
         {cta}
       </Link>
+    </Card>
+  );
+}
+
+function FeedbackCard({ feedback }: { feedback: FeedbackItem[] | null }) {
+  return (
+    <Card className="max-w-2xl">
+      <CardTitle>Reviewer feedback</CardTitle>
+      <p className="mt-1 text-body-sm text-body">
+        Rejected or reviewer-edited contributions, newest first. The note is
+        written by the reviewer.
+      </p>
+
+      {feedback === null ? (
+        <p className="mt-4 text-body-sm text-error">
+          Your feedback could not be read. Reload the page in a moment.
+        </p>
+      ) : feedback.length === 0 ? (
+        <p className="mt-4 text-body-sm text-mute">
+          No reviewer feedback yet.
+        </p>
+      ) : (
+        <ul className="mt-4 flex flex-col gap-3">
+          {feedback.map((item) => (
+            <li
+              key={`${item.kind}:${item.id}`}
+              className="rounded-md bg-surface-2/60 p-4"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone={item.status === "rejected" ? "error" : "neutral"}>
+                  {item.status === "rejected" ? "Rejected" : "Approved"}
+                </Badge>
+                <span className="text-caption text-mute">
+                  {item.kindLabel} · {item.reviewedLabel}
+                </span>
+                {item.reviewerEdited ? (
+                  <span className="text-caption text-accent-text">
+                    Edited by a reviewer
+                  </span>
+                ) : null}
+              </div>
+
+              {item.preview ? (
+                <p
+                  dir="rtl"
+                  lang="khw"
+                  className="script-nastaliq mt-2 break-words text-body-md text-ink"
+                >
+                  {item.preview}
+                </p>
+              ) : null}
+
+              {item.reviewNote ? (
+                <p className="mt-2 whitespace-pre-wrap break-words text-body-sm text-body">
+                  Reviewer note: {item.reviewNote}
+                </p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
     </Card>
   );
 }
