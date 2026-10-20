@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardTitle } from "@/components/ui/card";
-import { EmptyState, PageHeader } from "@/components/ui/page";
 import { CopyButton } from "@/components/ui/copy-button";
+import { EmptyState, PageHeader } from "@/components/ui/page";
 import { requireAppUser } from "@/lib/auth";
 import {
   getConversationItemCounts,
@@ -12,6 +13,15 @@ import {
   getInstructionItemCounts,
   type InstructionItemCounts,
 } from "@/lib/instructions-server";
+import { getOcrAdminStats, getOcrStorageStatus } from "@/lib/ocr/ocr-server";
+import {
+  OCR_LINE_STATUSES,
+  OCR_PAGE_STATUSES,
+  ocrLineStatusLabels,
+  ocrStatusLabels,
+  type OcrStorageStatus,
+} from "@/lib/ocr/pages";
+import { decideQuota } from "@/lib/ocr/submit";
 import { TEXT_SUBMISSION_STATUSES } from "@/lib/plain-text";
 import { getPlainTextAdminStats } from "@/lib/plain-text-server";
 
@@ -39,6 +49,10 @@ const CONVERSATION_IMPORT_USAGE =
 const CONVERSATION_JSONL_EXAMPLE =
   '{"turns":[{"role":"user","content":"Where can I buy a bus ticket?"},{"role":"assistant","content":"You can buy one at the station counter or on the bus from the driver."}]}';
 
+const SYNC_COMMAND = "npm run sync";
+
+const megabytes = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
+
 export default async function AdminPage() {
   const { profile } = await requireAppUser();
   if (profile.role !== "admin") notFound();
@@ -47,6 +61,10 @@ export default async function AdminPage() {
   const conversationCounts: ConversationItemCounts | null =
     await getConversationItemCounts();
   const plainTextStats = await getPlainTextAdminStats();
+  const [ocrStats, ocrStorage] = await Promise.all([
+    getOcrAdminStats(),
+    getOcrStorageStatus(),
+  ]);
 
   return (
     <>
@@ -231,6 +249,79 @@ export default async function AdminPage() {
           )}
         </Card>
 
+        <Card className="max-w-3xl">
+          <CardTitle>OCR pages and lines</CardTitle>
+          <p className="mt-1 text-body-sm text-body">
+            Every OCR page and line, by status. Incomplete pages are uploads
+            that were started but never finalized.
+          </p>
+
+          {ocrStats ? (
+            <>
+              <dl className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-5">
+                {OCR_PAGE_STATUSES.map((status) => (
+                  <div key={status}>
+                    <dt className="text-caption text-mute">
+                      {ocrStatusLabels[status]}
+                    </dt>
+                    <dd className="text-display-sm font-semibold text-ink">
+                      {ocrStats.pages[status]}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+
+              <dl className="mt-5 grid grid-cols-2 gap-4 border-t border-hairline pt-4 sm:grid-cols-4">
+                {OCR_LINE_STATUSES.map((status) => (
+                  <div key={status}>
+                    <dt className="text-caption text-mute">
+                      {ocrLineStatusLabels[status]} lines
+                    </dt>
+                    <dd className="text-display-sm font-semibold text-ink">
+                      {ocrStats.lines[status]}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+
+              {OCR_PAGE_STATUSES.every(
+                (status) => ocrStats.pages[status] === 0,
+              ) ? (
+                <p className="mt-4 text-body-sm text-mute">
+                  No OCR pages have been uploaded yet.
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="mt-4 text-body-sm text-error">
+              The OCR counts could not be read. Reload the page in a moment.
+            </p>
+          )}
+        </Card>
+
+        <OcrStorageCard storage={ocrStorage} />
+
+        <Card className="max-w-3xl">
+          <CardTitle>Sync reviewed OCR output</CardTitle>
+          <p className="mt-1 text-body-sm text-body">
+            This command is not part of the app. It will run locally under
+            scripts/ with the service role key, never from this page.
+          </p>
+          <div className="mt-4 flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2">
+            <code className="min-w-0 flex-1 break-all font-mono text-caption text-ink">
+              {SYNC_COMMAND}
+            </code>
+            <CopyButton
+              value={SYNC_COMMAND}
+              label="Copy the sync command"
+              className="-my-1 shrink-0"
+            />
+          </div>
+          <p className="mt-2 text-caption text-mute">
+            Available in a later update.
+          </p>
+        </Card>
+
         <EmptyState title="Export and sync stay local" className="max-w-3xl">
           <p>
             They run as scripts under scripts/ with the service role key, never
@@ -239,5 +330,98 @@ export default async function AdminPage() {
         </EmptyState>
       </div>
     </>
+  );
+}
+
+function OcrStorageCard({ storage }: { storage: OcrStorageStatus | null }) {
+  if (!storage) {
+    return (
+      <Card className="max-w-3xl">
+        <CardTitle>OCR storage</CardTitle>
+        <p className="mt-4 text-body-sm text-error">
+          The storage status could not be read. Reload the page in a moment.
+        </p>
+      </Card>
+    );
+  }
+
+  const decision = decideQuota(storage.usedBytes, storage.quotaBytes, 0);
+  const usedMb = storage.usedBytes / 1048576;
+  const quotaMb = storage.quotaBytes / 1048576;
+  const percent =
+    storage.quotaBytes <= 0
+      ? 0
+      : Math.min(
+          100,
+          Math.round((storage.usedBytes / storage.quotaBytes) * 100),
+        );
+  const tone =
+    decision === "block" ? "error" : decision === "warn" ? "accent" : "neutral";
+  const statusLabel =
+    decision === "block"
+      ? "Uploads blocked"
+      : decision === "warn"
+        ? "Quota warning"
+        : "Storage ok";
+
+  return (
+    <Card className="max-w-3xl">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <CardTitle>OCR storage</CardTitle>
+        <Badge tone={tone}>{statusLabel}</Badge>
+      </div>
+      <p className="mt-1 text-body-sm text-body">
+        Encoded line images in the private bucket, against the quota in
+        app_settings.
+      </p>
+
+      <dl className="mt-5 grid grid-cols-3 gap-4">
+        <div>
+          <dt className="text-caption text-mute">Used</dt>
+          <dd className="text-display-sm font-semibold text-ink">
+            {megabytes.format(usedMb)} MB
+          </dd>
+        </div>
+        <div>
+          <dt className="text-caption text-mute">Quota</dt>
+          <dd className="text-display-sm font-semibold text-ink">
+            {megabytes.format(quotaMb)} MB
+          </dd>
+        </div>
+        <div>
+          <dt className="text-caption text-mute">Share</dt>
+          <dd className="text-display-sm font-semibold text-ink">
+            {percent} percent
+          </dd>
+        </div>
+      </dl>
+
+      <div
+        role="progressbar"
+        aria-label="OCR storage used"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent}
+        aria-valuetext={`${percent} percent, ${megabytes.format(usedMb)} MB of ${megabytes.format(quotaMb)} MB`}
+        className="mt-3 h-2 overflow-hidden rounded-full bg-surface-2"
+      >
+        <div
+          className={
+            decision === "block"
+              ? "h-full rounded-full bg-error"
+              : "h-full rounded-full bg-accent"
+          }
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+
+      <p className="mt-3 text-body-sm text-body">
+        {decision === "block"
+          ? "Above 80 percent. New OCR uploads are blocked. Plain text, instructions and conversations still work."
+          : decision === "warn"
+            ? "At or above 60 percent. New OCR uploads still work, but the quota is filling."
+            : "Under 60 percent. New OCR uploads are accepted."}
+      </p>
+    </Card>
   );
 }

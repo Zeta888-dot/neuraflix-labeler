@@ -6,6 +6,12 @@ import { EmptyState, PageHeader } from "@/components/ui/page";
 import { requireAppUser } from "@/lib/auth";
 import { getConversationCounts } from "@/lib/conversations-server";
 import { getInstructionCounts } from "@/lib/instructions-server";
+import { getOcrCounts } from "@/lib/ocr/ocr-server";
+import {
+  OCR_PAGE_STATUSES,
+  ocrStatusLabels,
+  type OcrCounts,
+} from "@/lib/ocr/pages";
 import { getPlainTextCounts } from "@/lib/plain-text-server";
 
 export const metadata: Metadata = {
@@ -20,12 +26,17 @@ type Counts = Partial<Record<StatusKey, number>>;
 
 export default async function DashboardPage() {
   const { user } = await requireAppUser();
-  const [instructionCounts, conversationCounts, plainTextCounts] =
-    await Promise.all([
-      getInstructionCounts(user.id),
-      getConversationCounts(user.id),
-      getPlainTextCounts(user.id),
-    ]);
+  const [
+    instructionCounts,
+    conversationCounts,
+    plainTextCounts,
+    ocrCounts,
+  ] = await Promise.all([
+    getInstructionCounts(user.id),
+    getConversationCounts(user.id),
+    getPlainTextCounts(user.id),
+    getOcrCounts(user.id),
+  ]);
 
   const instructionTotal = instructionCounts
     ? STATUSES.reduce((sum, status) => sum + instructionCounts[status], 0)
@@ -36,11 +47,16 @@ export default async function DashboardPage() {
   const plainTextTotal = plainTextCounts
     ? TEXT_STATUSES.reduce((sum, status) => sum + plainTextCounts[status], 0)
     : 0;
+  const ocrTotal = ocrCounts
+    ? OCR_PAGE_STATUSES.reduce((sum, status) => sum + ocrCounts.pages[status], 0)
+    : 0;
   const allKnown =
     instructionCounts !== null &&
     conversationCounts !== null &&
-    plainTextCounts !== null;
-  const allTotals = instructionTotal + conversationTotal + plainTextTotal;
+    plainTextCounts !== null &&
+    ocrCounts !== null;
+  const allTotals =
+    instructionTotal + conversationTotal + plainTextTotal + ocrTotal;
 
   return (
     <>
@@ -49,7 +65,10 @@ export default async function DashboardPage() {
         description="Your own contribution counts, nothing else. No leaderboard, no project-wide numbers."
       />
 
-      {!instructionCounts && !conversationCounts && !plainTextCounts ? (
+      {!instructionCounts &&
+      !conversationCounts &&
+      !plainTextCounts &&
+      !ocrCounts ? (
         <div className="mt-6">
           <EmptyState title="Counts are not available right now">
             <p>
@@ -67,7 +86,7 @@ export default async function DashboardPage() {
             </p>
             <p className="mt-3">
               Not sure where to start? Read the Guidelines first, or open
-              Instructions, Conversations or Plain text to start.
+              Instructions, Conversations, Plain text or OCR pages to start.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               <Link
@@ -87,6 +106,9 @@ export default async function DashboardPage() {
                 className={buttonClasses({ size: "sm" })}
               >
                 Open Plain text
+              </Link>
+              <Link href="/ocr" className={buttonClasses({ size: "sm" })}>
+                Open OCR pages
               </Link>
               <Link
                 href="/guidelines"
@@ -127,6 +149,7 @@ export default async function DashboardPage() {
             total={plainTextTotal}
             emptyNote="No plain text submitted yet."
           />
+          <OcrCountsCard counts={ocrCounts} total={ocrTotal} />
         </div>
       )}
     </>
@@ -184,6 +207,60 @@ function CountsCard({
 
       <Link href={href} className={buttonClasses({ size: "sm" }) + " mt-6"}>
         {cta}
+      </Link>
+    </Card>
+  );
+}
+
+function OcrCountsCard({
+  counts,
+  total,
+}: {
+  counts: OcrCounts | null;
+  total: number;
+}) {
+  return (
+    <Card className="max-w-2xl">
+      <CardTitle>OCR pages</CardTitle>
+      <p className="mt-1 text-body-sm text-body">
+        Your OCR pages, by status, and the lines uploaded from them.
+      </p>
+
+      {counts ? (
+        <>
+          <dl className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3">
+            {OCR_PAGE_STATUSES.map((status) => (
+              <div key={status}>
+                <dt className="text-caption text-mute">
+                  {ocrStatusLabels[status]}
+                </dt>
+                <dd className="text-display-sm font-semibold text-ink">
+                  {counts.pages[status]}
+                </dd>
+              </div>
+            ))}
+            <div>
+              <dt className="text-caption text-mute">Lines uploaded</dt>
+              <dd className="text-display-sm font-semibold text-ink">
+                {counts.lines.toLocaleString("en")}
+              </dd>
+            </div>
+          </dl>
+
+          {total === 0 ? (
+            <p className="mt-4 text-body-sm text-mute">
+              No OCR pages yet.
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <p className="mt-4 text-body-sm text-error">
+          These counts could not be read. Reload the page in a moment.
+        </p>
+      )}
+
+      <Link href="/ocr" className={buttonClasses({ size: "sm" }) + " mt-6"}>
+        {total === 0 ? "Submit an OCR page" : "Open OCR pages"}
       </Link>
     </Card>
   );

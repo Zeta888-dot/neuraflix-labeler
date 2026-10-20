@@ -32,6 +32,7 @@ import {
   type LineDraft,
   type LineStatus,
 } from "@/lib/ocr/labels";
+import type { SubmitGate } from "@/lib/ocr/submit";
 import { LineThumb, type PageView } from "./page-preview";
 
 const STATUS_LABEL: Record<LineStatus, string> = {
@@ -63,6 +64,8 @@ export function LabelingView({
   onPageLabelChange,
   rights,
   onRightsChange,
+  gate,
+  onContinue,
 }: {
   page: PageView;
   lines: LineDraft[];
@@ -76,6 +79,8 @@ export function LabelingView({
   onPageLabelChange: (value: string) => void;
   rights: boolean;
   onRightsChange: (value: boolean) => void;
+  gate: SubmitGate;
+  onContinue: () => void;
 }) {
   const total = lines.length;
   const safeCurrent = Math.min(
@@ -374,13 +379,16 @@ export function LabelingView({
               <Button
                 type="button"
                 className="mt-3 h-11 sm:h-10"
-                disabled
+                onClick={onContinue}
+                disabled={!gate.canSubmit}
                 aria-describedby="ocr-submit-reason"
               >
-                Submit page
+                Continue to submit
               </Button>
               <p id="ocr-submit-reason" className="mt-2 text-caption text-mute">
-                Submitting pages opens in the next update.
+                {gate.canSubmit
+                  ? "Step 4 shows what will be uploaded before anything leaves this browser."
+                  : gate.reason}
               </p>
             </section>
           ) : null}
@@ -555,7 +563,8 @@ export function LabelingView({
           </div>
 
           <p className="mt-4 text-caption text-mute">
-            The page image, page label and line labels stay in this browser.
+            The page image stays in this browser. On submit, only the line
+            images and labels are uploaded.
           </p>
         </section>
       </aside>

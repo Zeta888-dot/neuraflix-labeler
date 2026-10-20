@@ -22,6 +22,17 @@ export function ocrDraftKey(userId: string): string {
   return `${OCR_DRAFT_KEY_PREFIX}${userId}`;
 }
 
+/**
+ * An upload that has left the browser but has not been finalized. The page id
+ * is kept so a reload can resume with the same row instead of creating another
+ * page. The encoded blobs are recreated from the original page on resume; only
+ * the uploaded line numbers are stored.
+ */
+export type OcrSubmission = {
+  pageId: string;
+  uploadedIdx: number[];
+};
+
 export type OcrDraft = {
   schemaVersion: typeof OCR_DRAFT_SCHEMA_VERSION;
   updatedAt: number;
@@ -35,6 +46,8 @@ export type OcrDraft = {
   currentLine: number;
   pageLabel: string;
   rightsConfirmed: boolean;
+  /** Present while a page is uploading or waiting for finalize. */
+  submission: OcrSubmission | null;
 };
 
 export type OcrDraftInput = Omit<OcrDraft, "schemaVersion" | "updatedAt">;
@@ -75,6 +88,27 @@ function isLineDraft(value: unknown): value is LineDraft {
   );
 }
 
+function parseSubmission(value: unknown): OcrSubmission | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.pageId !== "string" || value.pageId === "") return null;
+  if (!Array.isArray(value.uploadedIdx)) return null;
+
+  const uploadedIdx = value.uploadedIdx.filter(
+    (idx): idx is number =>
+      typeof idx === "number" &&
+      Number.isInteger(idx) &&
+      idx >= 1 &&
+      idx <= 40,
+  );
+
+  if (uploadedIdx.length !== value.uploadedIdx.length) return null;
+
+  return {
+    pageId: value.pageId,
+    uploadedIdx: [...new Set(uploadedIdx)].sort((a, b) => a - b),
+  };
+}
+
 function parseDraft(raw: unknown): OcrDraft | null {
   if (!isRecord(raw)) return null;
   if (raw.schemaVersion !== OCR_DRAFT_SCHEMA_VERSION) return null;
@@ -100,6 +134,10 @@ function parseDraft(raw: unknown): OcrDraft | null {
     currentLine: Math.max(0, Math.trunc(raw.currentLine)),
     pageLabel: raw.pageLabel.slice(0, 120),
     rightsConfirmed: raw.rightsConfirmed,
+    submission:
+      raw.submission === undefined || raw.submission === null
+        ? null
+        : parseSubmission(raw.submission),
   };
 }
 

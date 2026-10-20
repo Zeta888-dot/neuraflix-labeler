@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 
-/** Native dialog for the two destructive choices on the OCR page. */
+/** Native dialog for the destructive and submit choices on the OCR page. */
 export function ConfirmDialog({
   open,
   title,
   body,
+  children,
   confirmLabel,
   cancelLabel,
   onConfirm,
@@ -15,7 +16,8 @@ export function ConfirmDialog({
 }: {
   open: boolean;
   title: string;
-  body: string;
+  body?: string;
+  children?: ReactNode;
   confirmLabel: string;
   cancelLabel: string;
   onConfirm: () => void;
@@ -47,9 +49,9 @@ export function ConfirmDialog({
       <h2 id="ocr-confirm-title" className="text-display-sm font-semibold">
         {title}
       </h2>
-      <p id="ocr-confirm-body" className="mt-2 text-body-sm text-body">
-        {body}
-      </p>
+      <div id="ocr-confirm-body" className="mt-2 text-body-sm text-body">
+        {children ?? <p>{body}</p>}
+      </div>
       <div className="mt-5 flex flex-wrap justify-end gap-2">
         <Button
           type="button"

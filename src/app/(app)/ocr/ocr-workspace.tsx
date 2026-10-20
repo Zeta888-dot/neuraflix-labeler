@@ -9,10 +9,14 @@ import {
   type ChangeEvent,
   type DragEvent,
 } from "react";
-import { Button } from "@/components/ui/button";
+import { useRouter } from "next/navigation";
+import { Button, buttonClasses } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
 import { isBitmapUsable } from "@/lib/ocr/bitmap";
+import { cropToCanvas } from "@/lib/ocr/crop";
+import { encodeLine } from "@/lib/ocr/encode";
+import { logOcrSubmitError } from "@/lib/ocr/log";
 import {
   DEFAULT_PARAMS,
   lineBoxesEqual,
@@ -23,15 +27,24 @@ import {
 import { trimHorizontally } from "@/lib/ocr/line-edits";
 import {
   lineProgress,
+  normalizeLabel,
   statusForLabel,
   type LineDraft,
 } from "@/lib/ocr/labels";
+import type { OcrStorageStatus } from "@/lib/ocr/pages";
+import {
+  buildUploadPlan,
+  decideQuota,
+  submitGate,
+  type UploadPlanLine,
+} from "@/lib/ocr/submit";
 import {
   deleteOcrDraft,
   draftStoreMessage,
   readOcrDraft,
   writeOcrDraft,
   type OcrDraft,
+  type OcrSubmission,
 } from "@/lib/ocr/draft-store";
 import {
   PageSegmenter,
@@ -40,6 +53,8 @@ import {
   validatePageFile,
   type SegmentPageResult,
 } from "@/lib/ocr/segmenter";
+import { createClient } from "@/lib/supabase/client";
+import { abortOcrPage, createOcrPage, finalizeOcrPage } from "./actions";
 import { ConfirmDialog } from "./confirm-dialog";
 import { DetectionPanel } from "./detection-panel";
 import { LabelingView } from "./labeling-view";
@@ -50,18 +65,67 @@ import { PagePreview, type PageView } from "./page-preview";
 const DEBOUNCE_MS = 250;
 const DRAFT_SAVE_MS = 500;
 const HISTORY_LIMIT = 30;
+const UPLOAD_CONCURRENCY = 3;
+const UPLOAD_RETRIES = 3;
+const UPLOAD_BACKOFF_MS = 500;
 const RESET_NOTICE =
   "Labels on the changed lines were reset or removed. Unchanged lines keep their labels.";
+const QUOTA_FULL_NOTICE =
+  "OCR uploads are full for now. Plain text, instructions and conversations are still open.";
 
 type Busy = null | "load" | "detect";
-type Step = "review" | "label";
+type Step = "review" | "label" | "submit";
 type HistoryEntry = { lines: LineDraft[]; selected: number; current: number };
 type SaveState =
   | null
   | { kind: "saving" }
   | { kind: "saved"; at: number }
   | { kind: "error"; message: string };
-type DialogKind = "discard-draft" | "new-page" | null;
+type DialogKind =
+  | "discard-draft"
+  | "new-page"
+  | "submit"
+  | "cancel-submission"
+  | null;
+
+type PreparedLine = UploadPlanLine & {
+  blob: Blob;
+  type: "image/webp" | "image/jpeg";
+  width: number;
+  height: number;
+  bytes: number;
+};
+
+type PreparedImage = Omit<PreparedLine, "storage_path"> & {
+  extension: "webp" | "jpg";
+};
+
+type SubmitContext = {
+  lines: readonly LineDraft[];
+  label: string;
+  rights: boolean;
+  fileName: string;
+  submission: OcrSubmission | null;
+};
+
+/** Thrown after a Stop or Cancel so the run can leave without an error card. */
+class SubmissionHalted extends Error {
+  constructor() {
+    super("Submission stopped.");
+    this.name = "SubmissionHalted";
+  }
+}
+
+type SubmitState =
+  | { kind: "idle" }
+  | { kind: "preparing"; done: number; total: number }
+  | { kind: "creating" }
+  | { kind: "uploading"; done: number; total: number }
+  | { kind: "finalizing" }
+  | { kind: "stopping" }
+  | { kind: "cancelling" }
+  | { kind: "error"; message: string; stage: "prepare" | "create" | "upload" | "finalize" }
+  | { kind: "success"; lineCount: number };
 
 let lineSequence = 0;
 
@@ -146,7 +210,58 @@ function retireBitmap(bitmap: ImageBitmap | null | undefined) {
   window.setTimeout(() => bitmap.close(), 0);
 }
 
-export function OcrWorkspace({ userId }: { userId: string }) {
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+/** Let React paint a progress update before the next line is encoded. */
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, 0));
+}
+
+type BrowserSupabase = ReturnType<typeof createClient>;
+
+function errorMessageOf(caught: unknown, fallback: string): string {
+  if (caught && typeof caught === "object") {
+    const message = (caught as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim() !== "") return message;
+  }
+  return fallback;
+}
+
+async function uploadWithRetry(
+  supabase: BrowserSupabase,
+  line: PreparedLine,
+): Promise<void> {
+  let lastError: { message?: string; code?: string } | null = null;
+
+  for (let attempt = 0; attempt <= UPLOAD_RETRIES; attempt += 1) {
+    if (attempt > 0) {
+      await wait(UPLOAD_BACKOFF_MS * 2 ** (attempt - 1));
+    }
+
+    const { error } = await supabase.storage
+      .from("ocr-lines")
+      .upload(line.storage_path, line.blob, {
+        upsert: true,
+        contentType: line.type,
+      });
+
+    if (!error) return;
+    lastError = error;
+  }
+
+  throw lastError ?? new Error("The line image could not be uploaded.");
+}
+
+export function OcrWorkspace({
+  userId,
+  storageStatus,
+}: {
+  userId: string;
+  storageStatus: OcrStorageStatus | null;
+}) {
+  const router = useRouter();
   const [page, setPage] = useState<PageView | null>(null);
   const [step, setStep] = useState<Step>("review");
   const [fileName, setFileName] = useState<string | null>(null);
@@ -193,6 +308,13 @@ export function OcrWorkspace({ userId }: { userId: string }) {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [recovering, setRecovering] = useState(false);
 
+  const [submission, setSubmission] = useState<OcrSubmission | null>(null);
+  const [submitState, setSubmitState] = useState<SubmitState>({ kind: "idle" });
+  const [submitNotice, setSubmitNotice] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState<{
+    lineCount: number;
+  } | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const segmenterRef = useRef<PageSegmenter | null>(null);
   const bitmapRef = useRef<ImageBitmap | null>(null);
@@ -201,15 +323,43 @@ export function OcrWorkspace({ userId }: { userId: string }) {
   const loadTokenRef = useRef(0);
   const detectTokenRef = useRef(0);
   const saveTokenRef = useRef(0);
+  const submitRunRef = useRef(0);
+  const submitCancelRef = useRef(false);
+  const submitStopRef = useRef(false);
+  const submitActiveRef = useRef(false);
   const mountedRef = useRef(true);
   const manualEditsRef = useRef(false);
   const paramsRef = useRef(params);
   const appliedParamsRef = useRef<SegParams>(DEFAULT_PARAMS);
   const confirmOpenRef = useRef(false);
   const linesRef = useRef(lines);
+  const submissionRef = useRef<OcrSubmission | null>(null);
+  const preparedRef = useRef<PreparedImage[] | null>(null);
+  const currentLineRef = useRef(currentLine);
+  const pageLabelRef = useRef(pageLabel);
+  const rightsRef = useRef(rights);
 
   const boxes = lines.map((line) => line.box);
   const manualEdits = !lineBoxesEqual(boxes, detectedBoxes);
+  const gate = submitGate(lines, rights);
+  const quotaDecision = storageStatus
+    ? decideQuota(storageStatus.usedBytes, storageStatus.quotaBytes, 0)
+    : "ok";
+  const quotaBlocked = quotaDecision === "block";
+  const effectiveGate = quotaBlocked
+    ? {
+        ...gate,
+        canSubmit: false,
+        reason: QUOTA_FULL_NOTICE,
+      }
+    : gate;
+  const isSubmitting =
+    submitState.kind === "preparing" ||
+    submitState.kind === "creating" ||
+    submitState.kind === "uploading" ||
+    submitState.kind === "finalizing" ||
+    submitState.kind === "stopping" ||
+    submitState.kind === "cancelling";
 
   useEffect(() => {
     paramsRef.current = params;
@@ -218,6 +368,36 @@ export function OcrWorkspace({ userId }: { userId: string }) {
   useEffect(() => {
     linesRef.current = lines;
   }, [lines]);
+
+  useEffect(() => {
+    currentLineRef.current = currentLine;
+  }, [currentLine]);
+
+  useEffect(() => {
+    pageLabelRef.current = pageLabel;
+  }, [pageLabel]);
+
+  useEffect(() => {
+    rightsRef.current = rights;
+  }, [rights]);
+
+  useEffect(() => {
+    submissionRef.current = submission;
+  }, [submission]);
+
+  // A reload during an upload must warn, because the draft is the only record
+  // of which lines already reached Storage.
+  useEffect(() => {
+    if (!isSubmitting) return;
+
+    function onBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [isSubmitting]);
 
   useEffect(() => {
     manualEditsRef.current = manualEdits;
@@ -231,6 +411,10 @@ export function OcrWorkspace({ userId }: { userId: string }) {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      // Stop a submit that is still running and make sure it cannot write to a
+      // draft that belongs to a newer page after this one is unmounted.
+      submitRunRef.current += 1;
+      submitCancelRef.current = true;
       // StrictMode and Fast Refresh replay this effect while keeping the
       // page state. Let a new setup claim the page before it is released.
       queueMicrotask(() => {
@@ -268,7 +452,7 @@ export function OcrWorkspace({ userId }: { userId: string }) {
   // Autosave every change after a 500 ms pause. The page image is part of
   // the record and never leaves this browser.
   useEffect(() => {
-    if (draftCheck !== "ready" || draftStorageMessage) return;
+    if (draftCheck !== "ready" || draftStorageMessage || submitSuccess) return;
     if (!page || !fileRef.current || !fileName) return;
 
     const token = ++saveTokenRef.current;
@@ -276,6 +460,8 @@ export function OcrWorkspace({ userId }: { userId: string }) {
     setSaveState({ kind: "saving" });
 
     const timer = window.setTimeout(() => {
+      if (!mountedRef.current || token !== saveTokenRef.current) return;
+
       writeOcrDraft(userId, {
         file,
         fileName,
@@ -285,6 +471,7 @@ export function OcrWorkspace({ userId }: { userId: string }) {
         currentLine,
         pageLabel,
         rightsConfirmed: rights,
+        submission,
       })
         .then((saved) => {
           if (!mountedRef.current || token !== saveTokenRef.current) return;
@@ -310,6 +497,8 @@ export function OcrWorkspace({ userId }: { userId: string }) {
     currentLine,
     pageLabel,
     rights,
+    submission,
+    submitSuccess,
     userId,
   ]);
 
@@ -500,6 +689,9 @@ export function OcrWorkspace({ userId }: { userId: string }) {
 
   function resetPageState() {
     detectTokenRef.current += 1;
+    submitRunRef.current += 1;
+    submitCancelRef.current = true;
+    submitStopRef.current = false;
     segmenterRef.current?.dispose();
     segmenterRef.current = null;
     retireBitmap(bitmapRef.current);
@@ -524,6 +716,15 @@ export function OcrWorkspace({ userId }: { userId: string }) {
     setStep("review");
     setLineNotice(null);
     setSaveState(null);
+    setSubmission(null);
+    submissionRef.current = null;
+    preparedRef.current = null;
+    setSubmitState({ kind: "idle" });
+    setSubmitSuccess(null);
+    setSubmitNotice(null);
+    currentLineRef.current = 0;
+    pageLabelRef.current = "";
+    rightsRef.current = false;
   }
 
   async function processFile(file: File) {
@@ -629,7 +830,512 @@ export function OcrWorkspace({ userId }: { userId: string }) {
     }
   }
 
-  async function resumeDraft(draft: OcrDraft) {
+  function currentSubmitContext(): SubmitContext {
+    return {
+      lines: linesRef.current,
+      label: pageLabelRef.current,
+      rights: rightsRef.current,
+      fileName: fileName ?? "",
+      submission: submissionRef.current,
+    };
+  }
+
+  async function persistDraftSubmission(
+    context: SubmitContext,
+    record: OcrSubmission | null,
+  ): Promise<void> {
+    const file = fileRef.current;
+    if (!file || !context.fileName) return;
+
+    await writeOcrDraft(userId, {
+      file,
+      fileName: context.fileName,
+      params: paramsRef.current,
+      boxes: context.lines.map((line) => line.box),
+      lines: [...context.lines],
+      currentLine: currentLineRef.current,
+      pageLabel: context.label,
+      rightsConfirmed: context.rights,
+      submission: record,
+    });
+  }
+
+  /**
+   * Clear the local draft only when it still belongs to the page that was just
+   * finalized. A newer draft, for example one created after navigating away,
+   * is left alone.
+   */
+  async function clearDraftForPage(pageId: string): Promise<boolean> {
+    try {
+      const stored = await readOcrDraft(userId);
+      if (stored && stored.submission?.pageId !== pageId) return false;
+      await deleteOcrDraft(userId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function submissionHalted(): boolean {
+    return submitCancelRef.current || submitStopRef.current;
+  }
+
+  async function prepareImages(
+    context: SubmitContext,
+    run: number,
+  ): Promise<PreparedImage[]> {
+    const bitmap = bitmapRef.current;
+    if (!bitmap || !isBitmapUsable(bitmap)) {
+      throw new Error(
+        "The page image is no longer available. Reload the page, then try again.",
+      );
+    }
+
+    const targets = context.lines
+      .map((line, index) => ({ line, idx: index + 1 }))
+      .filter(
+        ({ line }) =>
+          line.status !== "unreadable" && normalizeLabel(line.label) !== "",
+      );
+
+    setSubmitState({ kind: "preparing", done: 0, total: targets.length });
+    const prepared: PreparedImage[] = [];
+
+    for (const target of targets) {
+      if (run !== submitRunRef.current || submissionHalted()) {
+        throw new SubmissionHalted();
+      }
+
+      const encoded = await encodeLine(cropToCanvas(bitmap, target.line.box));
+      prepared.push({
+        idx: target.idx,
+        label: normalizeLabel(target.line.label),
+        blob: encoded.blob,
+        type: encoded.type,
+        extension: encoded.extension,
+        width: encoded.width,
+        height: encoded.height,
+        bytes: encoded.bytes,
+      });
+
+      if (run !== submitRunRef.current) throw new SubmissionHalted();
+      setSubmitState({
+        kind: "preparing",
+        done: prepared.length,
+        total: targets.length,
+      });
+      await yieldToUi();
+    }
+
+    return prepared;
+  }
+
+  function preparedPlan(
+    context: SubmitContext,
+    prepared: readonly PreparedImage[],
+    pageId: string,
+  ): PreparedLine[] {
+    const byIndex = new Map(prepared.map((line) => [line.idx, line]));
+    const base = buildUploadPlan(context.lines, userId, pageId, "webp");
+
+    return base.map((item) => {
+      const image = byIndex.get(item.idx);
+      if (!image) {
+        throw new Error(
+          "A line image was missing from the upload. Retry the submission.",
+        );
+      }
+
+      return {
+        idx: item.idx,
+        label: item.label,
+        storage_path: `${userId}/${pageId}/${item.idx}.${image.extension}`,
+        blob: image.blob,
+        type: image.type,
+        width: image.width,
+        height: image.height,
+        bytes: image.bytes,
+      };
+    });
+  }
+
+  function finalizePrepared(pageId: string, plan: readonly PreparedLine[]) {
+    return finalizeOcrPage({
+      pageId,
+      lines: plan.map((line) => ({
+        idx: line.idx,
+        storagePath: line.storage_path,
+        label: line.label,
+        width: line.width,
+        height: line.height,
+        bytes: line.bytes,
+      })),
+    });
+  }
+
+  async function finishHalted(
+    pageId: string | null,
+    context: SubmitContext,
+    total: number,
+    uploadedCount: number,
+  ): Promise<void> {
+    if (submitCancelRef.current) {
+      if (pageId) {
+        const aborted = await abortOcrPage(pageId);
+        if (!aborted.ok) {
+          setSubmitState({
+            kind: "error",
+            stage: "upload",
+            message:
+              "The unfinished page could not be closed on the server. Retry the cancellation, or reload the page.",
+          });
+          return;
+        }
+      }
+
+      setSubmission(null);
+      submissionRef.current = null;
+      preparedRef.current = null;
+      try {
+        await persistDraftSubmission(context, null);
+      } catch {
+        // The remote page is closed. A stale local record would only retry a
+        // failed page, and the server refuses that.
+      }
+      setSubmitState({ kind: "idle" });
+      setStep("label");
+      setSubmitNotice(
+        "Submission cancelled. Your labels are still in this browser.",
+      );
+      router.refresh();
+      return;
+    }
+
+    if (!pageId) {
+      setSubmitState({ kind: "idle" });
+      setStep("label");
+      setSubmitNotice("Submission stopped. Your labels are still in this browser.");
+      return;
+    }
+
+    setSubmitState({ kind: "idle" });
+    setStep("submit");
+    setSubmitNotice(
+      total > 0
+        ? `Upload stopped at ${uploadedCount} of ${total} lines. Resume when you are ready.`
+        : "Upload stopped. Resume when you are ready.",
+    );
+    router.refresh();
+  }
+
+  async function runSubmission(context: SubmitContext): Promise<void> {
+    if (submitActiveRef.current) return;
+    submitActiveRef.current = true;
+
+    try {
+      await runSubmissionRun(context);
+    } finally {
+      submitActiveRef.current = false;
+    }
+  }
+
+  async function runSubmissionRun(context: SubmitContext): Promise<void> {
+    if (isSubmitting) return;
+
+    const run = ++submitRunRef.current;
+    submitCancelRef.current = false;
+    submitStopRef.current = false;
+    setSubmitNotice(null);
+    setSubmitSuccess(null);
+
+    const check = submitGate(context.lines, context.rights);
+    if (!check.canSubmit) {
+      setSubmitState({
+        kind: "error",
+        stage: "prepare",
+        message: check.reason ?? "This page cannot be submitted yet.",
+      });
+      return;
+    }
+
+    let pageId = context.submission?.pageId ?? null;
+    const uploaded = new Set(context.submission?.uploadedIdx ?? []);
+    let total = 0;
+    let stage: "prepare" | "create" | "upload" | "finalize" = "prepare";
+
+    try {
+      let prepared = context.submission ? preparedRef.current : null;
+      if (!prepared) {
+        prepared = await prepareImages(context, run);
+        preparedRef.current = prepared;
+      }
+
+      if (prepared.length < 1) {
+        throw new Error("Add at least one line label before you submit.");
+      }
+      total = prepared.length;
+
+      if (!pageId) {
+        stage = "create";
+        setSubmitState({ kind: "creating" });
+        const totalBytes = prepared.reduce((sum, line) => sum + line.bytes, 0);
+        const created = await createOcrPage({
+          label: context.label.trim(),
+          rights: context.rights,
+          lineCount: context.lines.length,
+          totalBytes,
+        });
+
+        if (run !== submitRunRef.current) {
+          // The page was reserved after this run was abandoned. Close it so a
+          // replaced or unmounted page does not stay Incomplete.
+          if (created.status === "created") void abortOcrPage(created.pageId);
+          return;
+        }
+        if (created.status === "error") {
+          setSubmitState({
+            kind: "error",
+            stage: "create",
+            message: created.message,
+          });
+          return;
+        }
+
+        pageId = created.pageId;
+        uploaded.clear();
+        const record: OcrSubmission = { pageId, uploadedIdx: [] };
+        setSubmission(record);
+        submissionRef.current = record;
+        try {
+          await persistDraftSubmission(context, record);
+        } catch {
+          // Upload continues. If the record was lost, a later resume uploads
+          // the same paths again with upsert.
+        }
+      }
+
+      if (submissionHalted()) {
+        await finishHalted(pageId, context, total, uploaded.size);
+        return;
+      }
+
+      const activePageId = pageId;
+      const plan = preparedPlan(context, prepared, activePageId);
+      total = plan.length;
+      const byIndex = new Map(prepared.map((line) => [line.idx, line]));
+      const pending = plan.filter((line) => !uploaded.has(line.idx));
+      let done = uploaded.size;
+      stage = "upload";
+
+      const supabase = createClient();
+      let failure: unknown = null;
+      let next = 0;
+
+      const uploadOne = async () => {
+        while (!failure && !submissionHalted()) {
+          const position = next;
+          next += 1;
+          if (position >= pending.length) return;
+
+          const line = pending[position];
+          const image = byIndex.get(line.idx);
+          if (!image) {
+            failure = new Error(
+              "A line image was missing from the upload. Retry the submission.",
+            );
+            return;
+          }
+
+          try {
+            await uploadWithRetry(supabase, {
+              idx: line.idx,
+              label: line.label,
+              storage_path: line.storage_path,
+              blob: image.blob,
+              type: image.type,
+              width: image.width,
+              height: image.height,
+              bytes: image.bytes,
+            });
+          } catch (caught) {
+            failure = caught;
+            logOcrSubmitError(
+              caught as { message?: unknown; code?: unknown },
+            );
+            return;
+          }
+
+          if (run !== submitRunRef.current) return;
+          uploaded.add(line.idx);
+          done += 1;
+          const record: OcrSubmission = {
+            pageId: activePageId,
+            uploadedIdx: [...uploaded].sort((a, b) => a - b),
+          };
+          setSubmission(record);
+          submissionRef.current = record;
+          if (mountedRef.current && !submissionHalted()) {
+            setSubmitState({
+              kind: "uploading",
+              done,
+              total: plan.length,
+            });
+          }
+          try {
+            await persistDraftSubmission(context, record);
+          } catch {
+            // The encoded lines are still in memory, and a retry upserts the
+            // same paths.
+          }
+        }
+      };
+
+      if (pending.length > 0) {
+        setSubmitState({ kind: "uploading", done, total: plan.length });
+        const workers = Array.from(
+          { length: Math.min(UPLOAD_CONCURRENCY, pending.length) },
+          () => uploadOne(),
+        );
+        await Promise.all(workers);
+      }
+
+      if (run !== submitRunRef.current) return;
+      if (failure) throw failure;
+      if (submissionHalted()) {
+        await finishHalted(pageId, context, total, uploaded.size);
+        return;
+      }
+
+      stage = "finalize";
+      setSubmitState({ kind: "finalizing" });
+      const finalized = await finalizePrepared(activePageId, plan);
+      if (run !== submitRunRef.current) return;
+
+      if (finalized.status !== "finalized") {
+        setSubmitState({
+          kind: "error",
+          stage: "finalize",
+          message: finalized.message,
+        });
+        return;
+      }
+
+      saveTokenRef.current += 1;
+      if (mountedRef.current) {
+        setSubmission(null);
+        submissionRef.current = null;
+        preparedRef.current = null;
+        setSubmitState({ kind: "idle" });
+        setSubmitSuccess({ lineCount: finalized.lineCount });
+        setSubmitNotice(null);
+        setStep("submit");
+      }
+
+      const cleared = await clearDraftForPage(activePageId);
+      if (mountedRef.current) {
+        if (cleared) setSavedDraft(null);
+        router.refresh();
+      }
+    } catch (caught) {
+      if (run !== submitRunRef.current) return;
+      if (caught instanceof SubmissionHalted) {
+        await finishHalted(pageId, context, total, uploaded.size);
+        return;
+      }
+
+      logOcrSubmitError(caught as { message?: unknown; code?: unknown });
+      setSubmitState({
+        kind: "error",
+        stage,
+        message: errorMessageOf(
+          caught,
+          "The page could not be submitted. Your labels are still in this browser.",
+        ),
+      });
+    }
+  }
+
+  function retrySubmission() {
+    if (isSubmitting) return;
+    void runSubmission(currentSubmitContext());
+  }
+
+  function stopUpload() {
+    if (submitState.kind !== "uploading") return;
+    submitStopRef.current = true;
+    submitCancelRef.current = false;
+    setSubmitState({ kind: "stopping" });
+  }
+
+  async function cancelSubmission(): Promise<void> {
+    if (isSubmitting && submitState.kind === "finalizing") return;
+    if (submitState.kind === "cancelling") return;
+
+    submitCancelRef.current = true;
+    submitStopRef.current = false;
+
+    if (
+      submitState.kind === "preparing" ||
+      submitState.kind === "creating" ||
+      submitState.kind === "uploading" ||
+      submitState.kind === "stopping"
+    ) {
+      setSubmitState({ kind: "cancelling" });
+      return;
+    }
+
+    setSubmitState({ kind: "cancelling" });
+    const context = currentSubmitContext();
+    const current = submissionRef.current;
+
+    if (current) {
+      const aborted = await abortOcrPage(current.pageId);
+      if (!aborted.ok) {
+        setSubmitState({
+          kind: "error",
+          stage: "upload",
+          message:
+            "The unfinished page could not be closed on the server. Retry, or reload the page.",
+        });
+        return;
+      }
+    }
+
+    setSubmission(null);
+    submissionRef.current = null;
+    preparedRef.current = null;
+    try {
+      await persistDraftSubmission(context, null);
+    } catch {
+      // The remote page is closed. The next save replaces the local record.
+    }
+    setSubmitState({ kind: "idle" });
+    setStep("label");
+    setSubmitNotice("Submission cancelled. Your labels are still in this browser.");
+    router.refresh();
+  }
+
+  function backToLabeling() {
+    if (submissionRef.current) return;
+    submitCancelRef.current = false;
+    submitStopRef.current = false;
+    setSubmitState({ kind: "idle" });
+    setSubmitNotice(null);
+    setStep("label");
+  }
+
+  function startAnotherPage() {
+    setSubmitSuccess(null);
+    setSubmitNotice(null);
+    resetPageState();
+  }
+
+  function confirmSubmit() {
+    setDialog(null);
+    void runSubmission(currentSubmitContext());
+  }
+
+  async function resumeDraft(draft: OcrDraft, continueUpload = false) {
     if (draftBusy !== null) return;
 
     const token = ++loadTokenRef.current;
@@ -718,6 +1424,11 @@ export function OcrWorkspace({ userId }: { userId: string }) {
       segmenterRef.current = segmenter;
       bitmapRef.current = result.bitmap;
       appliedParamsRef.current = draft.params;
+      paramsRef.current = draft.params;
+      linesRef.current = restored;
+      currentLineRef.current = restoredCurrent;
+      pageLabelRef.current = draft.pageLabel;
+      rightsRef.current = draft.rightsConfirmed;
       setParams(draft.params);
       setLines(restored);
       setDetectedBoxes(result.boxes);
@@ -738,13 +1449,35 @@ export function OcrWorkspace({ userId }: { userId: string }) {
       fileRef.current = draft.file;
       setPageLabel(draft.pageLabel);
       setRights(draft.rightsConfirmed);
-      setStep(hasProgress && canLabel ? "label" : "review");
+      setSubmission(draft.submission);
+      submissionRef.current = draft.submission;
+      preparedRef.current = null;
+      setSubmitState({ kind: "idle" });
+      setSubmitNotice(null);
+      setSubmitSuccess(null);
+      setStep(
+        draft.submission
+          ? "submit"
+          : hasProgress && canLabel
+            ? "label"
+            : "review",
+      );
       setLineNotice(null);
       setSaveState({ kind: "saved", at: draft.updatedAt });
       setSavedDraft(null);
       setDraftBusy(null);
       setResumeMessage("");
       setDraftActionError(null);
+
+      if (draft.submission && continueUpload) {
+        void runSubmission({
+          lines: restored,
+          rights: draft.rightsConfirmed,
+          label: draft.pageLabel,
+          fileName: draft.fileName,
+          submission: draft.submission,
+        });
+      }
     } catch (caught) {
       segmenter.dispose();
       if (!mountedRef.current || token !== loadTokenRef.current) return;
@@ -760,10 +1493,23 @@ export function OcrWorkspace({ userId }: { userId: string }) {
   }
 
   async function discardDraft() {
-    if (draftBusy !== null) return;
+    if (draftBusy !== null || isSubmitting) return;
     setDialog(null);
     setDraftBusy("discard");
     setDraftActionError(null);
+
+    const unfinished = savedDraft?.submission ?? null;
+    if (unfinished) {
+      const aborted = await abortOcrPage(unfinished.pageId);
+      if (!aborted.ok) {
+        if (!mountedRef.current) return;
+        setDraftBusy(null);
+        setDraftActionError(
+          "The unfinished page could not be closed on the server. Reload the page and try again.",
+        );
+        return;
+      }
+    }
 
     try {
       await deleteOcrDraft(userId);
@@ -787,6 +1533,16 @@ export function OcrWorkspace({ userId }: { userId: string }) {
   }
 
   function requestFile(file: File) {
+    if (isSubmitting) return;
+
+    if (submissionRef.current) {
+      setStep("submit");
+      setSubmitNotice(
+        "Finish or cancel the current submission before you start a new page.",
+      );
+      return;
+    }
+
     const invalid = validatePageFile(file);
     if (invalid) {
       setError(invalid);
@@ -803,6 +1559,7 @@ export function OcrWorkspace({ userId }: { userId: string }) {
   }
 
   function openPicker() {
+    if (isSubmitting) return;
     fileInputRef.current?.click();
   }
 
@@ -1044,17 +1801,19 @@ export function OcrWorkspace({ userId }: { userId: string }) {
     setStep("review");
   }
 
-  const saveText = page
-    ? draftStorageMessage
-      ? `Could not save. ${draftStorageMessage}`
-      : saveState?.kind === "saved"
-        ? `Saved in this browser at ${formatClock(saveState.at)}`
-        : saveState?.kind === "error"
-          ? `Could not save. ${saveState.message}`
-          : saveState?.kind === "saving"
-            ? "Saving in this browser..."
-            : "Preparing the local draft..."
-    : draftStorageMessage ?? "";
+  const saveText = submitSuccess
+    ? "Local draft cleared after submit"
+    : page
+      ? draftStorageMessage
+        ? `Could not save. ${draftStorageMessage}`
+        : saveState?.kind === "saved"
+          ? `Saved in this browser at ${formatClock(saveState.at)}`
+          : saveState?.kind === "error"
+            ? `Could not save. ${saveState.message}`
+            : saveState?.kind === "saving"
+              ? "Saving in this browser..."
+              : "Preparing the local draft..."
+      : draftStorageMessage ?? "";
 
   const currentPageSaved =
     saveState?.kind === "saved" || saveState?.kind === "saving";
@@ -1063,6 +1822,21 @@ export function OcrWorkspace({ userId }: { userId: string }) {
     : currentPageSaved
       ? "This replaces the page saved in this browser. Its image and labels will be deleted. This cannot be undone."
       : "The current page and any unsaved labels will be lost. This cannot be undone.";
+
+  const submitProgress =
+    submitState.kind === "preparing" || submitState.kind === "uploading"
+      ? {
+          done: submitState.done,
+          total: submitState.total,
+          label:
+            submitState.kind === "preparing"
+              ? "Preparing line images"
+              : "Uploading line images",
+        }
+      : null;
+  const resumeUploaded = submission?.uploadedIdx.length ?? 0;
+  const resumeTotal = Math.max(gate.labeled, resumeUploaded);
+  const canLeaveSubmit = submission === null && !isSubmitting;
 
   return (
     <div className="mt-6">
@@ -1082,6 +1856,35 @@ export function OcrWorkspace({ userId }: { userId: string }) {
           {saveText}
         </p>
       </div>
+
+      {quotaDecision === "warn" ? (
+        <p
+          role="status"
+          className="mt-4 rounded-md bg-surface px-3 py-2 text-body-sm text-ink shadow-elev-1"
+        >
+          OCR storage is at or above 60 percent. Uploads still work, but the
+          quota is filling.
+        </p>
+      ) : null}
+
+      {quotaBlocked ? (
+        <p
+          role="status"
+          className="mt-4 rounded-md bg-surface px-3 py-2 text-body-sm text-ink shadow-elev-1"
+        >
+          OCR uploads are paused because storage is above 80 percent. Plain
+          text, instructions and conversations are still open.
+        </p>
+      ) : null}
+
+      {submitNotice ? (
+        <p
+          role="status"
+          className="mt-4 rounded-md bg-surface px-3 py-2 text-body-sm text-ink shadow-elev-1"
+        >
+          {submitNotice}
+        </p>
+      ) : null}
 
       {error && step === "review" ? (
         <div
@@ -1123,26 +1926,63 @@ export function OcrWorkspace({ userId }: { userId: string }) {
       <ConfirmDialog
         open={dialog !== null}
         title={
-          dialog === "discard-draft" ? "Discard this draft?" : "Start a new page?"
+          dialog === "discard-draft"
+            ? "Discard this draft?"
+            : dialog === "submit"
+              ? "Submit this page?"
+              : "Start a new page?"
         }
         body={
           dialog === "discard-draft"
             ? "The saved page image and its labels will be deleted from this browser. This cannot be undone."
-            : newPageBody
+            : dialog === "submit"
+              ? undefined
+              : newPageBody
         }
         confirmLabel={
-          dialog === "discard-draft" ? "Discard draft" : "Start new page"
+          dialog === "discard-draft"
+            ? "Discard draft"
+            : dialog === "submit"
+              ? "Submit page"
+              : "Start new page"
         }
-        cancelLabel={dialog === "discard-draft" ? "Keep draft" : "Cancel"}
+        cancelLabel={
+          dialog === "discard-draft"
+            ? "Keep draft"
+            : dialog === "submit"
+              ? "Keep editing"
+              : "Cancel"
+        }
         onConfirm={() => {
           if (dialog === "discard-draft") void discardDraft();
-          else confirmNewPage();
+          else if (dialog === "submit") confirmSubmit();
+          else void confirmNewPage();
         }}
         onCancel={() => {
           setDialog(null);
           setPendingFile(null);
         }}
-      />
+      >
+        {dialog === "submit" ? (
+          <>
+            <p>
+              {effectiveGate.labeled === 1
+                ? "This uploads 1 line image and its label."
+                : `This uploads ${effectiveGate.labeled} line images and labels.`}
+            </p>
+            {effectiveGate.unreadable > 0 ? (
+              <p className="mt-2">
+                {effectiveGate.unreadable === 1
+                  ? "1 unreadable line is skipped."
+                  : `${effectiveGate.unreadable} unreadable lines are skipped.`}
+              </p>
+            ) : null}
+            <p className="mt-2">
+              The original page image stays in this browser.
+            </p>
+          </>
+        ) : null}
+      </ConfirmDialog>
 
       {draftCheck === "checking" ? <DraftCheckCard /> : null}
 
@@ -1154,7 +1994,9 @@ export function OcrWorkspace({ userId }: { userId: string }) {
               busy={draftBusy}
               message={resumeMessage}
               error={draftActionError}
-              onResume={() => void resumeDraft(savedDraft)}
+              onResume={() =>
+                void resumeDraft(savedDraft, savedDraft.submission !== null)
+              }
               onDiscard={() => {
                 setDraftActionError(null);
                 setDialog("discard-draft");
@@ -1275,8 +2117,8 @@ export function OcrWorkspace({ userId }: { userId: string }) {
               ) : null}
 
               <p className="mt-3 text-caption text-mute">
-                The page image and the labels stay in this browser. The
-                original image is never uploaded in this update.
+                The page image and labels stay in this browser until you
+                submit. The original image is never uploaded.
               </p>
             </Card>
           )}
@@ -1373,8 +2215,290 @@ export function OcrWorkspace({ userId }: { userId: string }) {
             onPageLabelChange={setPageLabel}
             rights={rights}
             onRightsChange={setRights}
+            gate={effectiveGate}
+            onContinue={() => {
+              setSubmitNotice(null);
+              setStep("submit");
+            }}
           />
         </OcrErrorBoundary>
+      ) : null}
+
+      {draftCheck === "ready" && step === "submit" && page ? (
+        <Card className="mt-4 p-4 sm:p-6" aria-labelledby="ocr-submit-heading">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2
+                id="ocr-submit-heading"
+                className="text-display-sm font-semibold text-ink"
+              >
+                {submitSuccess ? "Page submitted" : "Submit this page"}
+              </h2>
+              <p className="mt-1 max-w-[65ch] text-body-sm text-body">
+                {submitSuccess
+                  ? "The page is on the server and your local draft has been cleared."
+                  : "Check what will be uploaded. The original page image is never sent."}
+              </p>
+            </div>
+            {!submitSuccess ? (
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-11 sm:h-10"
+                onClick={backToLabeling}
+                disabled={!canLeaveSubmit}
+              >
+                Back to labeling
+              </Button>
+            ) : null}
+          </div>
+
+          {submitSuccess ? (
+            <div
+              role="status"
+              className="mt-4 rounded-md bg-accent-soft px-4 py-4"
+            >
+              <p className="text-body-md font-medium text-ink">
+                Page submitted. {submitSuccess.lineCount}{" "}
+                {submitSuccess.lineCount === 1 ? "line" : "lines"} uploaded.
+              </p>
+              <p className="mt-1 text-body-sm text-body">
+                It now appears in My pages with the Submitted status.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  className="h-11 sm:h-10"
+                  onClick={startAnotherPage}
+                >
+                  Start another page
+                </Button>
+                <a
+                  href="#my-pages"
+                  className={
+                    buttonClasses({ variant: "secondary", size: "sm" }) +
+                    " h-11 sm:h-10"
+                  }
+                >
+                  View My pages
+                </a>
+              </div>
+            </div>
+          ) : null}
+
+          {submitProgress ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="mt-4 rounded-md bg-surface-2 px-4 py-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 text-body-sm">
+                <span className="font-medium text-ink">
+                  {submitProgress.label}
+                </span>
+                <span className="tabular-nums text-body">
+                  {submitProgress.done} of {submitProgress.total}
+                </span>
+              </div>
+              <div
+                role="progressbar"
+                aria-label={submitProgress.label}
+                aria-valuemin={0}
+                aria-valuemax={submitProgress.total}
+                aria-valuenow={submitProgress.done}
+                aria-valuetext={`${submitProgress.done} of ${submitProgress.total} line images`}
+                className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface"
+              >
+                <div
+                  className="h-full rounded-full bg-accent transition-[width] duration-200 ease-[var(--ease-out-quart)]"
+                  style={{
+                    width:
+                      submitProgress.total === 0
+                        ? "0%"
+                        : `${Math.round(
+                            (submitProgress.done / submitProgress.total) * 100,
+                          )}%`,
+                  }}
+                />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {submitState.kind === "uploading" ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="h-11 sm:h-10"
+                    onClick={stopUpload}
+                  >
+                    Stop upload
+                  </Button>
+                ) : null}
+                {submitState.kind !== "stopping" ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="h-11 sm:h-10"
+                    onClick={() => void cancelSubmission()}
+                  >
+                    Cancel submission
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {!submitSuccess && !submitProgress && isSubmitting ? (
+            <p
+              role="status"
+              aria-live="polite"
+              className="mt-4 rounded-md bg-surface-2 px-4 py-3 text-body-sm text-ink"
+            >
+              {submitState.kind === "creating"
+                ? "Reserving the page"
+                : submitState.kind === "finalizing"
+                  ? "Saving the page. Keep this tab open."
+                  : submitState.kind === "stopping"
+                    ? "Stopping after the line images already in flight"
+                    : submitState.kind === "cancelling"
+                      ? "Cancelling the submission"
+                      : "Preparing the upload"}
+            </p>
+          ) : null}
+
+          {!submitSuccess && submitState.kind === "error" ? (
+            <div
+              role="alert"
+              className="mt-4 rounded-md bg-surface px-4 py-4 shadow-elev-1"
+            >
+              <p className="text-body-sm text-error">{submitState.message}</p>
+              {submission ? (
+                <p className="mt-2 text-caption text-body">
+                  Retry if this was temporary. To change a label, cancel the
+                  submission first.
+                </p>
+              ) : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  className="h-11 sm:h-10"
+                  onClick={retrySubmission}
+                >
+                  Retry submission
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-11 sm:h-10"
+                  onClick={() => void cancelSubmission()}
+                >
+                  Cancel submission
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {!submitSuccess &&
+          submission &&
+          submitState.kind === "idle" ? (
+            <div className="mt-4 rounded-md bg-surface-2 px-4 py-4">
+              <p className="text-body-md font-medium text-ink">
+                Upload interrupted
+              </p>
+              <p className="mt-1 text-body-sm text-body">
+                {resumeUploaded} of {resumeTotal} line images are uploaded.
+                Resume to finish this page.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  className="h-11 sm:h-10"
+                  onClick={retrySubmission}
+                >
+                  Resume upload
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-11 sm:h-10"
+                  onClick={() => void cancelSubmission()}
+                >
+                  Cancel submission
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {!submitSuccess &&
+          !isSubmitting &&
+          submitState.kind === "idle" &&
+          !submission ? (
+            <>
+              <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div>
+                  <dt className="text-caption text-mute">Page label</dt>
+                  <dd className="break-words text-body-sm text-ink">
+                    {pageLabel.trim() || "Untitled page"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-caption text-mute">Lines to upload</dt>
+                  <dd className="tabular-nums text-body-sm text-ink">
+                    {effectiveGate.labeled}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-caption text-mute">Unreadable</dt>
+                  <dd className="tabular-nums text-body-sm text-ink">
+                    {effectiveGate.unreadable}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-caption text-mute">Rights</dt>
+                  <dd className="text-body-sm text-ink">
+                    {rights ? "Confirmed" : "Not confirmed"}
+                  </dd>
+                </div>
+              </dl>
+
+              {!effectiveGate.canSubmit ? (
+                <p
+                  id="ocr-submit-page-reason"
+                  className="mt-3 text-body-sm text-error"
+                >
+                  {effectiveGate.reason}
+                </p>
+              ) : (
+                <p className="mt-3 text-body-sm text-body">
+                  Only the line images and labels are uploaded. The page image
+                  stays in this browser.
+                </p>
+              )}
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  className="h-11 sm:h-10"
+                  onClick={() => setDialog("submit")}
+                  disabled={!effectiveGate.canSubmit}
+                  aria-describedby={
+                    effectiveGate.canSubmit
+                      ? undefined
+                      : "ocr-submit-page-reason"
+                  }
+                >
+                  Submit page
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-11 sm:h-10"
+                  onClick={backToLabeling}
+                >
+                  Back to labeling
+                </Button>
+              </div>
+            </>
+          ) : null}
+        </Card>
       ) : null}
     </div>
   );
@@ -1387,7 +2511,13 @@ function StepIndicator({
   step: Step;
   hasPage: boolean;
 }) {
-  const active = !hasPage ? 1 : step === "review" ? 2 : 3;
+  const active = !hasPage
+    ? 1
+    : step === "submit"
+      ? 4
+      : step === "label"
+        ? 3
+        : 2;
 
   const numberClass = (index: number) =>
     cn(
@@ -1433,16 +2563,14 @@ function StepIndicator({
         </span>
         <span className={active === 3 ? "text-ink" : "text-mute"}>Label</span>
       </li>
-      <li className="flex flex-col gap-0.5">
-        <span className="flex items-center gap-2">
-          <span aria-hidden="true" className={numberClass(4)}>
-            4
-          </span>
-          <span className="text-mute">Submit</span>
+      <li
+        aria-current={active === 4 ? "step" : undefined}
+        className="flex items-center gap-2"
+      >
+        <span aria-hidden="true" className={numberClass(4)}>
+          4
         </span>
-        <span className="pl-8 text-caption text-mute">
-          Coming in the next update
-        </span>
+        <span className={active === 4 ? "text-ink" : "text-mute"}>Submit</span>
       </li>
     </ol>
   );
@@ -1477,11 +2605,12 @@ function ResumeCard({
   onDiscard: () => void;
 }) {
   const counts = lineProgress(draft.lines);
+  const hasUnfinishedUpload = draft.submission !== null;
 
   return (
     <Card className="mt-4 p-4 sm:p-6">
       <h2 className="text-display-sm font-semibold text-ink">
-        Resume your draft
+        {hasUnfinishedUpload ? "Resume your upload" : "Resume your draft"}
       </h2>
       <p className="mt-1 break-words text-body-md text-ink">
         {draft.pageLabel.trim() || draft.fileName}
@@ -1507,6 +2636,13 @@ function ResumeCard({
         </div>
       </dl>
 
+      {hasUnfinishedUpload ? (
+        <p className="mt-3 rounded-md bg-surface-2 px-3 py-2 text-body-sm text-body">
+          This draft has an unfinished upload. Resuming sends only the line
+          images that are still missing.
+        </p>
+      ) : null}
+
       <div className="mt-4 flex flex-wrap gap-2">
         <Button
           type="button"
@@ -1514,7 +2650,7 @@ function ResumeCard({
           onClick={onResume}
           disabled={busy !== null}
         >
-          Resume
+          {hasUnfinishedUpload ? "Resume upload" : "Resume"}
         </Button>
         <Button
           type="button"
@@ -1539,7 +2675,7 @@ function ResumeCard({
       ) : null}
 
       <p className="mt-3 text-caption text-mute">
-        The page image and labels are stored in this browser only.
+        The page image stays in this browser. The draft is stored locally.
       </p>
     </Card>
   );
