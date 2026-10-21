@@ -1,6 +1,6 @@
 # Handoff
 
-Status: L0 to L6 code is implemented, with L6 added as local export, sync and purge scripts. 0007 still has to be run against Supabase before Review and Admin work. No L7 work has started.
+Status: L0 to L6 code is implemented. `0007_review.sql` is confirmed applied and the L5 manual checks are complete. L6 live sync, export and purge dry-run checks remain outstanding. Purge `--commit` is not part of this audit. No L7 work has started.
 
 ## How to run
 
@@ -11,13 +11,12 @@ Status: L0 to L6 code is implemented, with L6 added as local export, sync and pu
 
 Environment variable names only: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OCR_STORAGE_QUOTA_MB`.
 
-## Supabase setup (once, in order)
+## Supabase setup
 
-1. Project settings, API: copy the project URL, anon key and service role key into `.env.local`.
+1. Project settings, API: copy the project URL, anon key and service role key into `.env.local`. Never commit or print them.
 2. Authentication: keep the email magic link and add `/auth/callback` for the local and deployed origins.
-3. SQL Editor: run `supabase/migrations/` 0001 to 0007 in order. L6 needs no new migration because `exported_at` and `purged_at` already exist.
-4. Make the first admin with the UPDATE statement in 0001's header comment.
-5. Later role changes use Admin, Users, or SQL:
+3. Migration: `0007_review.sql` is confirmed applied. Do not rerun it. Any future database change needs a separate new migration.
+4. The first admin already exists. Later role changes use Admin, Users, or SQL:
 
 ```sql
 update public.profiles p set role = 'reviewer'
@@ -28,7 +27,7 @@ update public.profiles p set role = 'reviewer'
 
 - `npm run export` writes a new snapshot. Options: `--out path`, `--data path`, `--dry-run`, `--no-latest`.
 - `npm run sync` is a dry run. `npm run sync -- --commit` downloads missing approved OCR images. Options: `--data path`, `--page uuid`.
-- `npm run purge:ocr` is a dry run. `npm run purge:ocr -- --commit` deletes remote OCR images. Options: `--data path`, `--page uuid`.
+- `npm run purge:ocr` is a dry run. Its `--commit` mode is destructive and must not be run during this audit or until a separate purge review is approved. Options: `--data path`, `--page uuid`.
 - Defaults are `exports/<UTC timestamp>/` and `data/ocr`. A custom `--out` that already exists is refused.
 - `exports/latest` is a junction on Windows and a directory link elsewhere. A real directory named latest is never removed; the export succeeds with a warning.
 
@@ -80,7 +79,7 @@ A split file is created only when that split has rows. `manifest.json` is writte
 - `exported_at` means a local image passed the sync checks: the expected path, type, byte count and dimensions match the row, and the file is recorded in the page manifest with its sha256. It does not mean a remote purge is safe by itself.
 - Purge is never automatic. It requires an approved line and page, `exported_at` set, a valid manifest entry, and a readable local file whose type, dimensions, byte count and sha256 all match. Only then does it delete the Storage object and set `purged_at`. The local file remains. The remote copy cannot be recovered after a purge, so keep the `data/ocr` directory backed up if another export may be needed.
 - If a purge deletes the remote object but the database update fails, running purge again verifies the local file, sees the object is already gone, and sets `purged_at`. If any local check fails, the remote object is left intact.
-- Sync and purge are idempotent. Use `--page uuid` to work one page at a time.
+- Sync and purge are idempotent. Use `--page uuid` to work one page at a time. Do not run purge with `--commit` during this audit.
 
 ## Recovery
 
@@ -91,13 +90,18 @@ A split file is created only when that split has rows. `manifest.json` is writte
 
 ## Verification
 
-1. Apply 0007, sign in as a reviewer, and approve at least one instruction, conversation, plain text and OCR page.
-2. Run `npm run sync`, then `npm run sync -- --commit`. Check `data/ocr/<page_uuid>/manifest.json` and the line files.
-3. Run `npm run export -- --dry-run`, then `npm run export`. Check the timestamp directory, top manifest, every schema, `ocr/images` and `exports/latest`.
-4. Run `npm run purge:ocr`. It must only list files, not delete. Then run `npm run purge:ocr -- --commit` and confirm `ocr_lines.purged_at` is set while the local images remain.
-5. Run `npm run test:core`, `npm run test:export`, `npm run lint` and `npm run build`.
-6. Earlier L5 checks still apply: Admin Overview and Users, role changes, all four review queues, OCR zoom and line removal, rejection feedback, ALREADY_REVIEWED, self review SQL, 360 px and 1440 px, both themes, keyboard A, R and 1 to 4.
+L5 manual checks are complete and were confirmed by the project owner. Do not repeat them, rerun `0007_review.sql`, or change the self-review setting as part of this audit.
 
-## L5 reference
+Outstanding L6 checks, in order. If credentials or approved test records are unavailable, mark the live steps blocked instead of using real user data.
 
-`review_counts()` drives the four queues. Reject needs a note of at least 3 characters. `ALREADY_REVIEWED` shows "Someone else already reviewed this item. Loading the next one." and `SELF_REVIEW` shows "You cannot review your own contribution." Self review is toggled with `update public.app_settings set value = 'true', updated_at = now() where key = 'allow_self_review';` and the same statement with `'false'`.
+1. Confirm `.env.local` exists with the documented names only. Never print its contents.
+2. Run `npm run sync`. This is a dry run and must not write files or mark rows.
+3. If approved test OCR data is available, run `npm run sync -- --commit --page <page_uuid>` for that page. Check `data/ocr/<page_uuid>/manifest.json` and the line images.
+4. Run `npm run export -- --dry-run`. It must not create an export directory.
+5. Run `npm run export`. Check the new `exports/<timestamp>/` directory, top manifest, schemas, OCR image mappings and `exports/latest`.
+6. Run `npm run purge:ocr` and confirm it only reports dry-run counts. Do not add `--commit`.
+7. Run `npm run test:core`, `npm run test:export`, `npm run lint` and `npm run build`.
+
+## L5 status
+
+The L5 review queues, approval, edit-and-approve, rejection notes, OCR line review, dashboard feedback, admin overview, role management, concurrency messages and self-review RPC checks are implemented and manually verified. No L5 code changes are planned unless the audit finds a concrete regression.

@@ -31,8 +31,11 @@ async function collect<T>(
     if (error) {
       throw new Error(`Could not read ${name}: ${error.message}`);
     }
+    if (!Array.isArray(data)) {
+      throw new Error(`Could not read ${name}: unexpected response`);
+    }
 
-    const batch: unknown[] = Array.isArray(data) ? data : [];
+    const batch: unknown[] = data;
     for (const entry of batch) {
       const parsed = parse(entry);
       if (!parsed) {
