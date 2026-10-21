@@ -265,7 +265,7 @@ export function PlainTextWorkspace({
   }
 
   return (
-    <div className="mt-6 max-w-3xl">
+    <div className="mt-6">
       {submitted ? (
         <Card role="status" className="mt-4">
           <CheckCircle

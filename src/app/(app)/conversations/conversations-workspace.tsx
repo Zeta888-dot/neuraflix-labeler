@@ -342,7 +342,7 @@ export function ConversationsWorkspace({
   ).length;
 
   return (
-    <div className="mt-6 max-w-3xl">
+    <div className="mt-6">
       {submitted !== null ? (
         <p className="text-body-sm text-mute">
           You have submitted {submitted}{" "}

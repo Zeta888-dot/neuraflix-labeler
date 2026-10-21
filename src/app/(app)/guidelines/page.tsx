@@ -23,7 +23,7 @@ export default function GuidelinesPage() {
         title="Guidelines"
         description="The same short rules apply to every module: instructions, conversations, plain text and OCR labels."
       />
-      <Card className="mt-6 max-w-2xl">
+      <Card className="mt-6">
         <CardTitle>How to write Khowar here</CardTitle>
         <ul className="mt-4 flex flex-col gap-3">
           {guidelines.map((guideline) => (

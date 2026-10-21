@@ -37,7 +37,7 @@ async function PlainTextLoader() {
 
 function PlainTextSkeleton() {
   return (
-    <div className="mt-6 max-w-3xl" aria-hidden="true">
+    <div className="mt-6" aria-hidden="true">
       <Card className="mt-4">
         <p className="text-body-sm text-mute">
           Loading the form and your submissions...

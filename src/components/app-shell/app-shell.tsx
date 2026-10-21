@@ -5,6 +5,7 @@ import {
   CaretRight,
   List,
   SignOut,
+  UserCircle,
   X,
   type Icon,
 } from "@phosphor-icons/react";
@@ -12,13 +13,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   useEffect,
+  useId,
   useRef,
   useState,
   useSyncExternalStore,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
 import { LabelerWordmark } from "@/components/brand/Wordmark";
-import { ThemeToggle } from "@/components/app-shell/theme-toggle";
+import { ThemeMenuItem } from "@/components/app-shell/theme-toggle";
 import {
   isActivePath,
   visibleNavItems,
@@ -43,6 +46,20 @@ export type AppShellUser = {
 
 const COLLAPSED_WIDTH = "lg:pl-[68px]";
 const EXPANDED_WIDTH = "lg:pl-64";
+
+/* Reading and form pages hold a calmer measure; the work surfaces that need
+   horizontal room run wider. Both are centred in the space right of the
+   sidebar by the single <main> container below. */
+const READING_WIDTH = "max-w-[60rem]";
+const WIDE_WIDTH = "max-w-[88rem]";
+const WIDE_CONTENT_PREFIXES = ["/admin", "/ocr", "/review"];
+
+function contentWidthClass(pathname: string): string {
+  const wide = WIDE_CONTENT_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+  return wide ? WIDE_WIDTH : READING_WIDTH;
+}
 
 export function AppShell({
   user,
@@ -132,15 +149,15 @@ export function AppShell({
           <span className={cn(collapsed ? "lg:block" : "lg:hidden")}>
             <LabelerWordmark size={16} />
           </span>
-          <div className="ml-auto flex items-center gap-2">
-            <ThemeToggle />
-          </div>
         </header>
 
         <main
           id="main"
           tabIndex={-1}
-          className="mx-auto w-full max-w-[1400px] px-4 py-8 outline-none lg:px-8 lg:py-10"
+          className={cn(
+            "mx-auto w-full px-4 py-8 outline-none lg:px-8 lg:py-10",
+            contentWidthClass(pathname),
+          )}
         >
           {children}
         </main>
@@ -249,14 +266,30 @@ function UserMenu({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
+
+  function closeMenu(returnFocus = false) {
+    setOpen(false);
+    if (returnFocus) triggerRef.current?.focus();
+  }
 
   useEffect(() => {
     if (!open) return;
+    menuRef.current
+      ?.querySelector<HTMLElement>('[role="menuitem"]')
+      ?.focus({ preventScroll: true });
+
     function onPointerDown(event: PointerEvent) {
       if (!ref.current?.contains(event.target as Node)) setOpen(false);
     }
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     }
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -266,6 +299,44 @@ function UserMenu({
     };
   }, [open]);
 
+  function onMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeMenu(true);
+      return;
+    }
+
+    if (
+      event.key !== "ArrowDown" &&
+      event.key !== "ArrowUp" &&
+      event.key !== "Home" &&
+      event.key !== "End"
+    ) {
+      return;
+    }
+
+    const items = Array.from(
+      menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+    );
+    if (items.length === 0) return;
+
+    event.preventDefault();
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    let next = 0;
+    if (event.key === "ArrowDown") {
+      next = current < 0 ? 0 : (current + 1) % items.length;
+    } else if (event.key === "ArrowUp") {
+      next =
+        current < 0
+          ? items.length - 1
+          : (current - 1 + items.length) % items.length;
+    } else if (event.key === "End") {
+      next = items.length - 1;
+    }
+    items[next]?.focus();
+  }
+
   return (
     <div
       ref={ref}
@@ -273,32 +344,40 @@ function UserMenu({
     >
       {open ? (
         <div
+          id={menuId}
+          ref={menuRef}
           role="menu"
           aria-label="Account menu"
-          className="absolute bottom-full left-2 z-40 mb-2 w-56 rounded-lg bg-surface p-1 shadow-elev-5"
+          onKeyDown={onMenuKeyDown}
+          className={cn(
+            "absolute z-40 w-56 max-w-[calc(100vw-1rem)] rounded-lg bg-surface p-1 shadow-elev-5",
+            collapsed ? "bottom-2 left-full ml-2" : "bottom-full left-2 mb-2",
+          )}
         >
-          <div className="px-3 py-2">
+          <div role="presentation" className="px-3 py-2">
             <p className="truncate text-body-sm text-ink">{user.displayName}</p>
             {user.email ? (
               <p className="truncate text-caption text-mute">{user.email}</p>
             ) : null}
-            <p className="mt-1 text-caption text-mute capitalize">
+            <p className="mt-1 text-caption capitalize text-mute">
               {user.role}
             </p>
           </div>
+          <ThemeMenuItem />
           <Link
             href="/account"
             role="menuitem"
-            onClick={() => setOpen(false)}
-            className="block rounded-md px-3 py-2 text-body-sm text-body hover:bg-surface-2 hover:text-ink pointer-coarse:min-h-11"
+            onClick={() => closeMenu()}
+            className="flex min-h-11 items-center gap-2 rounded-md px-3 text-body-sm text-body transition-colors hover:bg-surface-2 hover:text-ink"
           >
+            <UserCircle size={16} weight="light" aria-hidden="true" />
             Account
           </Link>
-          <form action={signOut}>
+          <form action={signOut} role="none">
             <button
               type="submit"
               role="menuitem"
-              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-body-sm text-body hover:bg-surface-2 hover:text-ink pointer-coarse:min-h-11"
+              className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-body-sm text-body transition-colors hover:bg-surface-2 hover:text-ink"
             >
               <SignOut size={16} weight="light" aria-hidden="true" />
               Sign out
@@ -308,13 +387,21 @@ function UserMenu({
       ) : null}
 
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => (open ? closeMenu() : setOpen(true))}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
         aria-label={`Account menu for ${user.displayName}`}
         className={cn(
-          "flex w-full items-center gap-2 rounded-md p-1.5 hover:bg-surface-2 pointer-coarse:min-h-11",
+          "flex min-h-11 w-full items-center gap-2 rounded-md p-1.5 hover:bg-surface-2",
           collapsed && "justify-center",
         )}
       >

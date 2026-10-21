@@ -23,7 +23,7 @@ export default async function AccountPage() {
         title="Account"
         description="Your display name and the details stored for this account."
       />
-      <Card className="mt-6 max-w-xl">
+      <Card className="mt-6">
         <AccountForm initialDisplayName={profile.display_name ?? ""} />
 
         <dl className="mt-8 flex flex-col gap-4 border-t border-hairline pt-6">

@@ -93,3 +93,9 @@ L7a browser checks: keyboard focus rings, dialog focus return, skip link, the re
 ## Next phase (L7b)
 
 L7b covers deployment and the live account path: hosting the Next.js app, the production domain `label.neuraflix.si`, Google login in Supabase Auth, SMTP for magic links, callback and redirect URLs for the deployed origin, and the neuraflix.si integration (links between the marketing site and the labeler). It does not change the phase L7a code.
+
+## UI tuning
+
+- Shared page container: reading and form routes cap at 60rem, OCR, review and admin at 88rem, all centred in the space right of the sidebar.
+- The account block opens a menu above it with the theme toggle (showing the current Light or Dark), Account and Sign out; the standalone top bar toggle is gone.
+- Global cursor rule in `src/app/globals.css`: pointer for interactive controls, not-allowed for disabled controls, text cursor kept for text fields.

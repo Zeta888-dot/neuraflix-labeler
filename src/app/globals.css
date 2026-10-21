@@ -273,6 +273,30 @@
     opacity: 1;
   }
 
+  /* Interactive controls get the pointer cursor even where the UA leaves the
+     default arrow. Text fields are not listed, so they keep the text cursor
+     and the textarea resize handle keeps its resize cursor. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href],
+  summary,
+  select,
+  label[for],
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"],
+  input[type="file"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="switch"] {
+    cursor: pointer;
+  }
+
+  :is(button, a, input, select, textarea, summary, [role]):disabled,
+  :is(button, a, input, select, textarea, summary, [role])[aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
   /* Native dialog used by the mobile drawer and small sheets. */
   dialog::backdrop {
     background-color: rgb(0 0 0 / 0.5);

@@ -8,7 +8,7 @@ const base =
   "inline-flex items-center justify-center gap-1.5 rounded-full font-medium " +
   "whitespace-nowrap transition-colors duration-150 ease-[var(--ease-out-quart)] " +
   "pointer-coarse:min-h-11 " +
-  "disabled:pointer-events-none disabled:opacity-50 " +
+  "disabled:opacity-50 " +
   "active:translate-y-px";
 
 const variants: Record<Variant, string> = {

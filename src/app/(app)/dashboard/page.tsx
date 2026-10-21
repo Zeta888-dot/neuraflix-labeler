@@ -182,7 +182,7 @@ function CountsCard({
   statuses?: readonly StatusKey[];
 }) {
   return (
-    <Card className="max-w-2xl">
+    <Card>
       <CardTitle>{title}</CardTitle>
       <p className="mt-1 text-body-sm text-body">{description}</p>
 
@@ -220,7 +220,7 @@ function CountsCard({
 
 function FeedbackCard({ feedback }: { feedback: FeedbackItem[] | null }) {
   return (
-    <Card className="max-w-2xl">
+    <Card>
       <CardTitle>Reviewer feedback</CardTitle>
       <p className="mt-1 text-body-sm text-body">
         Rejected or reviewer-edited contributions, newest first. The note is
@@ -287,7 +287,7 @@ function OcrCountsCard({
   total: number;
 }) {
   return (
-    <Card className="max-w-2xl">
+    <Card>
       <CardTitle>OCR pages</CardTitle>
       <p className="mt-1 text-body-sm text-body">
         Your OCR pages, by status, and the lines uploaded from them.
