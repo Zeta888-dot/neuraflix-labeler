@@ -18,6 +18,7 @@ import {
   buildCharset,
   buildExportData,
   contributorsCsv,
+  datasetNotes,
   ocrJsonl,
   ocrText,
   toJsonl,
@@ -321,6 +322,10 @@ function main(): void {
       writeDataset(outDir, "parallel", build.parallel, (rows) => toJsonl(rows));
       writeOcr(outDir, build, preflight, createdAt);
 
+      writeTextNoOverwrite(
+        join(outDir, "DATASET_NOTES.md"),
+        datasetNotes(build.counts, createdAt),
+      );
       writeTextNoOverwrite(
         join(outDir, "contributors.csv"),
         contributorsCsv(build.contributors),

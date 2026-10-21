@@ -5,6 +5,7 @@ import {
   buildCharset,
   buildExportData,
   contributorsCsv,
+  datasetNotes,
   normalizeForExport,
   normalizeInlineForExport,
   ocrJsonl,
@@ -315,6 +316,38 @@ test("charset and contributors are real counts", () => {
   const csv = contributorsCsv(built.contributors);
   assert.match(csv, /^contributor_id,instruction_translations,/);
   assert.match(csv, new RegExp(`^${USER},0,0,0,2$`, "m"));
+});
+
+test("dataset notes cover every split, the counts and the policy lines", () => {
+  const built = buildExportData({
+    instructions: [instruction()],
+    conversations: [conversation()],
+    texts: [text()],
+    ocrLines: [ocr()],
+  });
+  const notes = datasetNotes(built.counts, "2026-10-22T00:00:00.000Z");
+
+  for (const name of ["cpt", "sft", "sft_multiturn", "parallel", "ocr"]) {
+    assert.match(notes, new RegExp(`### ${name}/`));
+  }
+
+  for (const [name, split] of [
+    ["cpt", built.counts.cpt],
+    ["sft", built.counts.sft],
+    ["sft_multiturn", built.counts.sftMultiturn],
+    ["parallel", built.counts.parallel],
+    ["ocr", built.counts.ocr],
+  ] as const) {
+    assert.match(
+      notes,
+      new RegExp(`\\| ${name} \\| ${split.train} \\| ${split.val} \\|`),
+    );
+  }
+
+  assert.match(notes, /contains no personal data; contributors\.csv is pseudonymous and for admin use only/);
+  assert.match(notes, /to be decided before any public release/);
+  assert.match(notes, /tokenizer\.apply_chat_template is applied at training time/);
+  assert.match(notes, /Free OCR\./);
 });
 
 test("invalid paths, empty approved text and turn mismatches fail loudly", () => {

@@ -1,7 +1,9 @@
 import {
   parseAdminOverview,
+  parseAdminSettings,
   parseAdminUser,
   type AdminOverview,
+  type AdminSettings,
   type AdminUser,
 } from "@/lib/admin";
 import { logRpcError } from "@/lib/rpc-log";
@@ -59,6 +61,30 @@ export async function getAdminUsers(): Promise<AdminUser[] | null> {
   }
 
   return users;
+}
+
+/** Read-only settings. The RPC checks the admin role again in the database. */
+export async function getAdminSettings(): Promise<AdminSettings | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("admin_settings_status");
+
+  if (error) {
+    logRpcError("[admin_settings]", error);
+    return null;
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  const settings = parseAdminSettings(rows[0]);
+
+  if (!settings) {
+    logRpcError("[admin_settings]", {
+      message: "Unexpected admin_settings_status payload",
+      code: "ADMIN_PARSE",
+    });
+    return null;
+  }
+
+  return settings;
 }
 
 /** Both admin reads at once, so the page makes one pass. */

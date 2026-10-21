@@ -65,6 +65,12 @@ export type AdminUser = {
   totalCount: number;
 };
 
+/** The two read-only settings shown on the admin page, as stored text. */
+export type AdminSettings = {
+  allowSelfReview: string;
+  ocrQuotaMb: string;
+};
+
 function numberOf(value: unknown): number | null {
   const number = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(number) || number < 0) return null;
@@ -209,4 +215,17 @@ export function parseAdminUser(value: unknown): AdminUser | null {
     totalCount:
       instructionCount + conversationCount + textCount + ocrPageCount,
   };
+}
+
+/** Reads the single admin_settings_status row. */
+export function parseAdminSettings(value: unknown): AdminSettings | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+
+  const allowSelfReview = trimmedString(row.allow_self_review);
+  const ocrQuotaMb = trimmedString(row.ocr_quota_mb);
+
+  if (!allowSelfReview || !ocrQuotaMb) return null;
+
+  return { allowSelfReview, ocrQuotaMb };
 }

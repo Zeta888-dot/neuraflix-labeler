@@ -5,8 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardTitle } from "@/components/ui/card";
 import { CopyButton } from "@/components/ui/copy-button";
 import { EmptyState, PageHeader } from "@/components/ui/page";
-import type { AdminOverview } from "@/lib/admin";
-import { getAdminData } from "@/lib/admin-server";
+import type { AdminOverview, AdminSettings } from "@/lib/admin";
+import { getAdminData, getAdminSettings } from "@/lib/admin-server";
 import { getProfile, getSessionUser } from "@/lib/auth";
 import { getConversationItemCounts } from "@/lib/conversations-server";
 import { getInstructionItemCounts } from "@/lib/instructions-server";
@@ -51,6 +51,10 @@ const EXPORT_COMMAND = "npm run export";
 const SYNC_COMMAND = "npm run sync";
 const PURGE_COMMAND = "npm run purge:ocr";
 
+const SELF_REVIEW_OFF_SQL = `update public.app_settings
+   set value = 'false', updated_at = now()
+ where key = 'allow_self_review';`;
+
 const megabytes = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
 
 /* The header is static. The session, the role check and every count happen
@@ -83,6 +87,7 @@ async function AdminLoader() {
     plainTextStats,
     ocrStats,
     ocrStorage,
+    settings,
   ] = await Promise.all([
     getAdminData(),
     getInstructionItemCounts(),
@@ -90,6 +95,7 @@ async function AdminLoader() {
     getPlainTextAdminStats(),
     getOcrAdminStats(),
     getOcrStorageStatus(),
+    getAdminSettings(),
   ]);
 
   return (
@@ -323,6 +329,8 @@ async function AdminLoader() {
       </Card>
 
       <OcrStorageCard storage={ocrStorage} />
+
+      <AdminSettingsCard settings={settings} />
 
       <Card className="max-w-3xl">
         <CardTitle>Export and OCR image sync</CardTitle>
@@ -571,6 +579,70 @@ function OcrStorageCard({ storage }: { storage: OcrStorageStatus | null }) {
             ? "At or above 60 percent. New OCR uploads still work, but the quota is filling."
             : "Under 60 percent. New OCR uploads are accepted."}
       </p>
+    </Card>
+  );
+}
+
+function AdminSettingsCard({ settings }: { settings: AdminSettings | null }) {
+  if (!settings) {
+    return (
+      <Card className="max-w-3xl">
+        <CardTitle>Settings</CardTitle>
+        <p className="mt-4 text-body-sm text-error">
+          The settings could not be read. Apply 0008_admin_settings.sql, then
+          reload the page.
+        </p>
+      </Card>
+    );
+  }
+
+  const selfReview = settings.allowSelfReview.toLowerCase() === "true";
+
+  return (
+    <Card className="max-w-3xl">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <CardTitle>Settings</CardTitle>
+        <Badge tone={selfReview ? "error" : "neutral"}>
+          {selfReview ? "Self-review on" : "Self-review off"}
+        </Badge>
+      </div>
+      <p className="mt-1 text-body-sm text-body">
+        Read-only. Change either value with SQL in the Supabase SQL editor.
+      </p>
+
+      <dl className="mt-5 grid grid-cols-2 gap-4">
+        <div>
+          <dt className="text-caption text-mute">allow_self_review</dt>
+          <dd className="mt-1 font-mono text-body-sm text-ink">
+            {settings.allowSelfReview}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-caption text-mute">ocr_quota_mb</dt>
+          <dd className="mt-1 font-mono text-body-sm text-ink">
+            {settings.ocrQuotaMb}
+          </dd>
+        </div>
+      </dl>
+
+      {selfReview ? (
+        <div className="mt-5 border-t border-hairline pt-4">
+          <p className="text-body-sm text-body">
+            Self-review lets a reviewer approve their own contribution. Turn it
+            off before real review work starts.
+          </p>
+          <div className="mt-2 flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2">
+            <code className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-caption text-ink">
+              {SELF_REVIEW_OFF_SQL}
+            </code>
+            <CopyButton
+              value={SELF_REVIEW_OFF_SQL}
+              label="Copy the SQL to turn off self-review"
+              className="-my-1 shrink-0"
+            />
+          </div>
+        </div>
+      ) : null}
     </Card>
   );
 }
