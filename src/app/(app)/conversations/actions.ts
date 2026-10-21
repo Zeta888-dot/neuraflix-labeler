@@ -21,6 +21,12 @@ import {
   type ConversationSource,
   type ConversationTranslationValues,
 } from "@/lib/khowar";
+import {
+  RATE_LIMIT_MESSAGE,
+  isExpiredSubmissionError,
+  isInvalidTurnsError,
+  isRateLimitError,
+} from "@/lib/rate-limit";
 import { logRpcError } from "@/lib/rpc-log";
 import { createClient } from "@/lib/supabase/server";
 
@@ -153,17 +159,16 @@ export async function submitConversation(
 
   if (error) {
     logRpcError("[submit_conversation]", error);
-    const message = error.message ?? "";
-    if (
-      message.includes("CLAIM_EXPIRED") ||
-      message.includes("ALREADY_SUBMITTED")
-    ) {
+    if (isRateLimitError(error)) {
+      return { status: "error", message: RATE_LIMIT_MESSAGE };
+    }
+    if (isExpiredSubmissionError(error)) {
       return {
         status: "expired",
         workspace: await withCounts(userId, await claimNextConversation(db)),
       };
     }
-    if (message.includes("INVALID_TURNS")) {
+    if (isInvalidTurnsError(error)) {
       return {
         status: "error",
         message:

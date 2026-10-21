@@ -9,7 +9,7 @@ export function Textarea({
     <textarea
       className={cn(
         "w-full rounded-md bg-surface px-3 py-2 text-body-sm text-ink",
-        "shadow-elev-1 outline-none",
+        "shadow-elev-1",
         "transition-colors duration-150 ease-[var(--ease-out-quart)]",
         "hover:border-hairline-strong",
         "disabled:cursor-not-allowed disabled:opacity-60",

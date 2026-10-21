@@ -37,7 +37,7 @@ export function CopyButton({
         type="button"
         onClick={copy}
         aria-label={state === "copied" ? `${label} (copied)` : label}
-        className="inline-flex size-8 items-center justify-center rounded-full text-mute transition-colors hover:bg-surface-2 hover:text-ink"
+        className="inline-flex size-8 items-center justify-center rounded-full text-mute transition-colors hover:bg-surface-2 hover:text-ink pointer-coarse:size-11"
       >
         {state === "copied" ? (
           <Check size={14} weight="light" aria-hidden="true" />

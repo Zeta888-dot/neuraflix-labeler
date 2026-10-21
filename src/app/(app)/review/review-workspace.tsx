@@ -541,7 +541,7 @@ export function ReviewWorkspace({
       const target = event.target as HTMLElement | null;
       if (
         target?.closest(
-          "input, textarea, select, [contenteditable='true'], [role='dialog']",
+          "input, textarea, select, button, a, summary, [contenteditable='true'], [role='dialog'], [role='menuitem']",
         )
       ) {
         return;

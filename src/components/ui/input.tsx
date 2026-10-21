@@ -10,7 +10,7 @@ export function Input({
     <input
       className={cn(
         "h-10 w-full rounded-md bg-surface px-3 text-body-sm text-ink",
-        "shadow-elev-1 outline-none",
+        "shadow-elev-1 pointer-coarse:min-h-11",
         "transition-colors duration-150 ease-[var(--ease-out-quart)]",
         "hover:border-hairline-strong",
         "disabled:cursor-not-allowed disabled:opacity-60",

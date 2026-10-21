@@ -2,15 +2,18 @@ import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/session";
 
 /**
- * Optimistic route protection. Everything except /login and /auth/callback
- * requires a session; the authoritative check happens again in the server
- * layouts (src/lib/auth.ts).
+ * Optimistic route protection. Everything except /login, /auth/callback and
+ * the /api/health keep-alive probe requires a session; the authoritative check
+ * happens again in the server layouts (src/lib/auth.ts).
  */
 export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
 
   return updateSession(request).then(({ response, userId }) => {
-    const isPublic = path === "/login" || path.startsWith("/auth/");
+    const isPublic =
+      path === "/login" ||
+      path.startsWith("/auth/") ||
+      path === "/api/health";
 
     if (!userId && !isPublic) {
       const url = request.nextUrl.clone();

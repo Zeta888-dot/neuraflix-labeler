@@ -1,6 +1,6 @@
 # Handoff
 
-Status: L0 to L6 are done. `0007_review.sql` is confirmed applied and the L5 manual checks are complete. `0008_admin_settings.sql` is written but not yet applied. The L6 manual order below is not yet confirmed, and the sync dry run is not yet confirmed. No L7 work has started.
+Status: L0 to L6 are implemented. L7a (code hardening) is complete in code. L7b (hosting, Google login, SMTP and the neuraflix.si integration) has not started. `0009_hardening.sql` is written but not applied.
 
 ## How to run
 
@@ -9,27 +9,35 @@ Status: L0 to L6 are done. `0007_review.sql` is confirmed applied and the L5 man
 3. `npm run dev`, then open http://localhost:3000
 4. `npm run test:core`, `npm run test:ocr`, `npm run test:export`, `npm run lint` and `npm run build`.
 
-Environment variable names only: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
-
-The OCR quota has no environment variable. Its only source is `app_settings.ocr_quota_mb`. Warn at 60 percent after upload, block above 80 percent.
+Environment variable names only: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`. The OCR quota has no environment variable. Its only source is `app_settings.ocr_quota_mb`. Warn at 60 percent after upload, block above 80 percent.
 
 ## Supabase setup
 
 1. Project settings, API: copy the project URL, anon key and service role key into `.env.local`. Never commit or print them.
 2. Authentication: keep the email magic link and add `/auth/callback` for the local and deployed origins.
-3. Migration: `0007_review.sql` is confirmed applied. Do not rerun it. `0008_admin_settings.sql` is written but not yet applied. Run it next, then follow the manual order under Verification. Any future database change needs a separate new migration.
-4. The first admin already exists. Later role changes use Admin, Users, or SQL:
+3. Migration: `0007_review.sql` is confirmed applied. Apply `0008_admin_settings.sql` if it is not applied yet. Then paste `supabase/migrations/0009_hardening.sql` into the Supabase SQL editor and Run. It is safe to run again. Nothing in this repo applies it.
+4. `0009` adds the submission rate limits, the plain text trigger, `health_ping()` and its grants. Until it is applied, `/api/health` returns 503 and the new limits are not enforced.
+5. The first admin already exists. Later role changes use Admin, Users, or SQL:
 
 ```sql
 update public.profiles p set role = 'reviewer'
   from auth.users u where u.id = p.id and u.email = 'person@example.com';
 ```
 
+## L7a hardening
+
+- Rate limits are rolling one-hour windows: 60 instruction submissions, 30 conversation submissions and 30 plain text submissions per contributor. The functions and trigger live in `0009_hardening.sql`.
+- `submit_instruction_translation` and `submit_conversation_translation` raise `RATE_LIMIT`; the actions map it to "You are submitting very quickly. Please wait a little and try again." Plain text uses a `BEFORE INSERT` trigger, so the 0005 policy is unchanged.
+- `/api/health` calls `health_ping()` with the anon key and returns `{ok:true}` or 503 `{ok:false}`. No table is read and no detail is exposed. It is public in `src/proxy.ts`.
+- The keep-alive workflow is `.github/workflows/keep-alive.yml`. It runs every 3 days and by hand. Set the repository variable `HEALTH_URL` under Settings, Secrets and variables, Actions, Variables, to `https://<host>/api/health`. A non-200 response fails the job.
+- `supabase/cleanup/launch-reset.sql` is not a migration. Run `npm run purge:ocr` first, because deleting OCR rows removes the only map to the Storage objects. Review the counts with the default ROLLBACK, fill in the explicit test id blocks only for confirmed test rows, then change the last statement to COMMIT. Never run it against real contributor data.
+- Tests: `test:core` 81, `test:ocr` 22, `test:export` 28. Lint and build pass. Browser checks for focus, 360px layout and reduced motion are still manual.
+
 ## L6 commands
 
 - `npm run export` writes a new snapshot and `DATASET_NOTES.md`. Options: `--out path`, `--data path`, `--dry-run`, `--no-latest`.
 - `npm run sync` is a dry run. `npm run sync -- --commit` downloads missing approved OCR images. Sync never deletes remote objects. Options: `--data path`, `--page uuid`.
-- `npm run purge:ocr` is a dry run. Purge is the only command that deletes remote objects. Its `--commit` mode is destructive and runs only after the earlier Verification steps pass. Options: `--data path`, `--page uuid`.
+- `npm run purge:ocr` is a dry run. Purge is the only command that deletes remote objects. Its `--commit` mode is destructive. Options: `--data path`, `--page uuid`.
 - Defaults are `exports/<UTC timestamp>/` and `data/ocr`. A custom `--out` that already exists is refused.
 - `exports/latest` is a junction on Windows and a directory link elsewhere. A real directory named latest is never removed; the export succeeds with a warning.
 
@@ -50,7 +58,7 @@ data/ocr/<page_uuid>/line_<NN>.<webp|jpg>
 data/ocr/<page_uuid>/manifest.json
 ```
 
-A split file is created only when that split has rows. `manifest.json` is written last, so a directory without it is incomplete and must not be treated as an export. No manifest stores labels or names. `contributors.csv` has `contributor_id,instruction_translations,conversation_translations,text_submissions,ocr_lines` and pseudonymous ids only.
+A split file is created only when that split has rows. `manifest.json` is written last. No manifest stores labels or names. `contributors.csv` has pseudonymous ids only.
 
 ## Export schemas
 
@@ -63,59 +71,25 @@ A split file is created only when that split has rows. `manifest.json` is writte
 - `ocr/charset.json`: frequency sorted `{"char","code","count"}` entries.
 - `ocr/manifest.json`: `schemaVersion`, `createdAt`, prompt, counts and rows with `id`, `pageId`, `lineId`, `line`, `image`, `split`, `bytes`, `width`, `height`, `sha256`.
 - Top `manifest.json`: schema, `createdAt`, normalization rules, split method, `ocrPrompt`, `valRatio`, real counts and warnings.
-- `DATASET_NOTES.md`: purpose, one example line for each split, counts from the manifest, normalization and split rules, the privacy line, the licence line and a short load snippet. It is not written in a dry run.
+- `DATASET_NOTES.md`: purpose, one example line for each split, counts, normalization and split rules, privacy, licence and a load snippet. It is not written in a dry run.
 - The full page image is never read or exported.
 
-## Selection and splits
+## Selection, sync and purge
 
-- Text export includes rows whose final status is exactly `approved`. Draft, submitted, rejected, incomplete and unreviewed rows are excluded.
-- OCR export requires both the OCR line and its page to be `approved`. A line that is approved under a non-approved page is excluded.
-- Export is a fresh snapshot and does not require `exported_at`; it never changes text status. OCR images must already exist in `data/ocr` and pass manifest, type, size, dimension and sha256 checks, so run sync first when OCR is approved.
+- Text export includes rows whose final status is exactly `approved`. OCR export requires both the line and its page to be `approved`.
 - Normalization: NFC, U+064A and U+0649 to U+06CC, U+0643 to U+06A9, controls and invisible marks removed, ZWNJ kept, whitespace collapsed. Paragraph breaks stay in plain text.
-- Splits use SHA-1 of the source item id, val when the value is below 0.05. Records from one source item stay together. OCR groups by page id and falls back to line id at 20 or more lines. If either side would be empty, all rows stay in train. Output order is sorted by id.
-- A malformed approved row stops the export instead of silently dropping data.
+- Splits use SHA-1 of the source item id, val when the value is below 0.05. Records from one source item stay together. If either side would be empty, all rows stay in train.
+- Sync validates each storage path as `<contributor_uuid>/<page_uuid>/<line>.<webp|jpg>`, checks header, type, bytes and dimensions, then writes through a temporary file. An existing file is never replaced.
+- Purge needs an approved line and page, `exported_at`, a valid manifest entry, and a local file whose type, dimensions, bytes and sha256 match. Only then does it delete the Storage object and set `purged_at`. Local files are kept.
+- A malformed approved row stops the export. Sync and purge are idempotent. Use `--page uuid` to work one page at a time.
+- `--include-unreviewed` and `--push-hf` remain waived. Offsite backup is a manual copy of `data/` for now.
 
-## Sync, resume and purge
+## Manual checks still open
 
-Sync and purge are separate commands. This is an intentional deviation from LABELER.md section 9: sync never deletes remote objects, and `purge:ocr --commit` is the only step that deletes them.
+L6: run `npm run sync` (dry run), then `sync --commit` for one approved page, `export --dry-run`, `export`, `purge:ocr` and `purge:ocr --commit` for the same page. Check `exports/<timestamp>/` and `data/ocr/<page_uuid>/manifest.json`. If credentials or approved test records are unavailable, mark these blocked instead of using real user data.
 
-- Sync validates each storage path as `<contributor_uuid>/<page_uuid>/<line>.<webp|jpg>` and ties it to the database page, line and page contributor. Remote names are never used as local names.
-- Sync downloads only approved page and line images. It checks image header, type, byte count and dimensions against the row, then writes a temporary file, fsyncs it and hard links it into place. An existing file is never replaced. A bad or mismatched local file is reported and left untouched.
-- The page manifest is written before `exported_at` is marked. A crash at any point is safe to retry. Leftover temporary files older than one hour are removed; they are never treated as images.
-- `exported_at` means a local image passed the sync checks: the expected path, type, byte count and dimensions match the row, and the file is recorded in the page manifest with its sha256. It does not mean a remote purge is safe by itself.
-- Purge is never automatic. It requires an approved line and page, `exported_at` set, a valid manifest entry, and a readable local file whose type, dimensions, byte count and sha256 all match. Only then does it delete the Storage object and set `purged_at`. The local file remains. The remote copy cannot be recovered after a purge, so keep the `data/ocr` directory backed up if another export may be needed.
-- If a purge deletes the remote object but the database update fails, running purge again verifies the local file, sees the object is already gone, and sets `purged_at`. If any local check fails, the remote object is left intact.
-- Sync and purge are idempotent. Use `--page uuid` to work one page at a time.
+L7a browser checks: keyboard focus rings, dialog focus return, skip link, the review single-key shortcuts outside form controls, 44px touch targets on a coarse pointer, 360px width, reduced motion, and both themes for muted text contrast.
 
-## Waivers and deviations
+## Next phase (L7b)
 
-- `--include-unreviewed`: not implemented, waived.
-- `--push-hf`: not implemented, waived. Offsite backup is a manual copy of `data/` for now.
-- Sync and purge are separate commands. This is an intentional deviation from LABELER.md section 9. Sync never deletes remote objects, and purge is a separate destructive command.
-
-## Recovery
-
-- A partial export has no top `manifest.json`; `exports/latest` still points at the previous complete export. Nothing is overwritten. Delete the partial directory manually after checking it.
-- If export fails because OCR images are missing, run `npm run sync -- --commit` and retry.
-- If sync reports a mismatched local file, move that file aside manually, then rerun. The scripts do not replace or delete it for you.
-- If a local manifest is unreadable, sync and purge stop for that page and leave everything in place.
-
-## Verification
-
-L5 manual checks are complete and were confirmed by the project owner. Do not repeat them, rerun `0007_review.sql`, or change the self-review setting as part of this audit.
-
-Confirm `.env.local` exists with the documented names only. Never print its contents.
-
-Manual L6 order, not yet confirmed. If credentials or approved test records are unavailable, mark the live steps blocked instead of using real user data.
-
-1. Apply `supabase/migrations/0008_admin_settings.sql` in the Supabase SQL editor. It is safe to run again.
-2. Run `npm run sync`. This is a dry run and must not write files or mark rows. The sync dry run is not yet confirmed.
-3. Run `npm run sync -- --commit --page <page_uuid>` for one approved page. Check `data/ocr/<page_uuid>/manifest.json` and the line images.
-4. Run `npm run export -- --dry-run`, then `npm run export`. The dry run must not create an export directory. Check the new `exports/<timestamp>/` directory, `DATASET_NOTES.md`, top manifest, schemas, OCR image mappings and `exports/latest`.
-5. Run `npm run purge:ocr` and confirm it only reports dry-run counts.
-6. Run `npm run purge:ocr -- --commit --page <page_uuid>` for the same page. This deletes remote objects and cannot be undone. Check that the local images remain and `purged_at` is set.
-7. Run `npm run test:core`, `npm run test:ocr`, `npm run test:export`, `npm run lint` and `npm run build`.
-
-## L5 status
-
-The L5 review queues, approval, edit-and-approve, rejection notes, OCR line review, dashboard feedback, admin overview, role management, concurrency messages and self-review RPC checks are implemented and manually verified. No L5 code changes are planned unless the audit finds a concrete regression.
+L7b covers deployment and the live account path: hosting the Next.js app, the production domain `label.neuraflix.si`, Google login in Supabase Auth, SMTP for magic links, callback and redirect URLs for the deployed origin, and the neuraflix.si integration (links between the marketing site and the labeler). It does not change the phase L7a code.

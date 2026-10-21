@@ -48,7 +48,7 @@ export function EmptyState({
       )}
       {...props}
     >
-      <p className="text-body-md font-medium text-ink">{title}</p>
+      <h2 className="text-body-md font-medium text-ink">{title}</h2>
       {children ? (
         <div className="mt-2 max-w-[65ch] text-body-sm text-body">{children}</div>
       ) : null}

@@ -207,7 +207,7 @@ export function AdminUsers({
                             setMessage(null);
                             setError(null);
                           }}
-                          className="min-h-11 rounded-md bg-surface px-3 text-body-sm text-ink shadow-elev-1 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                          className="min-h-11 rounded-md bg-surface px-3 text-body-sm text-ink shadow-elev-1"
                         >
                           {ADMIN_ROLES.map((role) => (
                             <option key={role} value={role}>

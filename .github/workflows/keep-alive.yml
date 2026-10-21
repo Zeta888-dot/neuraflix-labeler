@@ -1,0 +1,51 @@
+name: Keep alive
+
+# Ping the deployed labeler every 3 days so the free Supabase project does not
+# pause. The URL is a repository variable, never a hardcoded domain.
+#
+# Set it once:
+#   GitHub repository > Settings > Secrets and variables > Actions > Variables
+#   > New repository variable
+#   Name:  HEALTH_URL
+#   Value: https://<your-deployed-host>/api/health
+#
+# The job fails on a non-200 response, so a paused or broken deployment shows
+# up as a failed workflow run.
+
+on:
+  schedule:
+    # Every 3 days at 06:17 UTC. GitHub may delay scheduled runs.
+    - cron: "17 6 */3 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    name: Ping /api/health
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check the health endpoint
+        env:
+          HEALTH_URL: ${{ vars.HEALTH_URL }}
+        run: |
+          if [ -z "$HEALTH_URL" ]; then
+            echo "::error::Repository variable HEALTH_URL is not set. Add it under Settings, Secrets and variables, Actions, Variables."
+            exit 1
+          fi
+
+          status=$(curl --silent --show-error --location \
+            --output /dev/null \
+            --write-out "%{http_code}" \
+            --max-time 30 \
+            "$HEALTH_URL")
+
+          echo "Health endpoint returned HTTP $status"
+
+          if [ "$status" -ne 200 ]; then
+            echo "::error::Health check failed with HTTP $status."
+            exit 1
+          fi

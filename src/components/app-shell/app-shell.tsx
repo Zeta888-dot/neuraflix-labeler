@@ -74,6 +74,7 @@ export function AppShell({
       </a>
 
       <aside
+        aria-label="Sidebar"
         className={cn(
           "fixed inset-y-0 left-0 z-30 hidden flex-col border-r border-hairline bg-surface lg:flex",
           collapsed ? "w-[68px]" : "w-64",
@@ -99,7 +100,7 @@ export function AppShell({
             type="button"
             onClick={() => setDrawerOpen(false)}
             aria-label="Close menu"
-            className="inline-flex size-9 items-center justify-center rounded-full text-body hover:bg-surface-2 hover:text-ink"
+            className="inline-flex size-9 items-center justify-center rounded-full text-body hover:bg-surface-2 hover:text-ink pointer-coarse:size-11"
           >
             <X size={18} weight="light" aria-hidden="true" />
           </button>
@@ -124,7 +125,7 @@ export function AppShell({
             type="button"
             onClick={() => setDrawerOpen(true)}
             aria-label="Open menu"
-            className="-ml-1 inline-flex size-9 items-center justify-center rounded-full text-body hover:bg-surface-2 hover:text-ink lg:hidden"
+            className="-ml-1 inline-flex size-9 items-center justify-center rounded-full text-body hover:bg-surface-2 hover:text-ink pointer-coarse:size-11 lg:hidden"
           >
             <List size={20} weight="light" aria-hidden="true" />
           </button>
@@ -179,7 +180,7 @@ function SidebarContent({
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-expanded={!collapsed}
             className={cn(
-              "inline-flex size-9 items-center justify-center rounded-full text-mute hover:bg-surface-2 hover:text-ink",
+              "inline-flex size-9 items-center justify-center rounded-full text-mute hover:bg-surface-2 hover:text-ink pointer-coarse:size-11",
               collapsed ? "" : "ml-auto",
             )}
           >
@@ -205,7 +206,7 @@ function SidebarContent({
                   aria-current={active ? "page" : undefined}
                   title={collapsed ? item.label : undefined}
                   className={cn(
-                    "relative flex h-9 items-center gap-2.5 rounded-md px-2 text-body-sm transition-colors",
+                    "relative flex h-9 items-center gap-2.5 rounded-md px-2 text-body-sm transition-colors pointer-coarse:min-h-11",
                     active
                       ? "bg-surface-2 text-ink"
                       : "text-body hover:bg-surface-2 hover:text-ink",
@@ -289,7 +290,7 @@ function UserMenu({
             href="/account"
             role="menuitem"
             onClick={() => setOpen(false)}
-            className="block rounded-md px-3 py-2 text-body-sm text-body hover:bg-surface-2 hover:text-ink"
+            className="block rounded-md px-3 py-2 text-body-sm text-body hover:bg-surface-2 hover:text-ink pointer-coarse:min-h-11"
           >
             Account
           </Link>
@@ -297,7 +298,7 @@ function UserMenu({
             <button
               type="submit"
               role="menuitem"
-              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-body-sm text-body hover:bg-surface-2 hover:text-ink"
+              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-body-sm text-body hover:bg-surface-2 hover:text-ink pointer-coarse:min-h-11"
             >
               <SignOut size={16} weight="light" aria-hidden="true" />
               Sign out
@@ -313,7 +314,7 @@ function UserMenu({
         aria-expanded={open}
         aria-label={`Account menu for ${user.displayName}`}
         className={cn(
-          "flex w-full items-center gap-2 rounded-md p-1.5 hover:bg-surface-2",
+          "flex w-full items-center gap-2 rounded-md p-1.5 hover:bg-surface-2 pointer-coarse:min-h-11",
           collapsed && "justify-center",
         )}
       >

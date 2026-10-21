@@ -135,7 +135,7 @@ export function KhowarField({
           onClick={() => setPaletteOpen((open) => !open)}
           aria-expanded={paletteOpen}
           aria-controls={paletteId}
-          className="inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-caption text-body transition-colors hover:bg-surface-2 hover:text-ink"
+          className="inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-caption text-body transition-colors hover:bg-surface-2 hover:text-ink pointer-coarse:min-h-11"
         >
           {paletteOpen ? (
             <CaretUp size={14} weight="light" aria-hidden="true" />
@@ -171,7 +171,7 @@ export function KhowarField({
           aria-describedby={describedBy}
           className={cn(
             "script-nastaliq h-11 w-full rounded-md bg-surface px-3 text-body-md text-ink",
-            "shadow-elev-1 outline-none",
+            "shadow-elev-1",
             "transition-colors duration-150 ease-[var(--ease-out-quart)]",
             "hover:border-hairline-strong",
             "disabled:cursor-not-allowed disabled:opacity-60",
@@ -201,7 +201,7 @@ export function KhowarField({
           aria-describedby={describedBy}
           className={cn(
             "script-nastaliq w-full resize-y rounded-md bg-surface px-3 py-2 text-body-md text-ink",
-            "shadow-elev-1 outline-none",
+            "shadow-elev-1",
             "transition-colors duration-150 ease-[var(--ease-out-quart)]",
             "hover:border-hairline-strong",
             "disabled:cursor-not-allowed disabled:opacity-60",

@@ -40,7 +40,10 @@ export function RejectDialog({
   const dialogRef = useRef<HTMLDialogElement>(null);
   const noteRef = useRef<HTMLTextAreaElement | null>(null);
   const titleId = useId();
+  const descriptionId = useId();
+  const hintId = useId();
   const errorId = useId();
+  const describedBy = [hintId, error ? errorId : null].filter(Boolean).join(" ");
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -63,6 +66,7 @@ export function RejectDialog({
     <dialog
       ref={dialogRef}
       aria-labelledby={titleId}
+      aria-describedby={descriptionId}
       onCancel={(event) => {
         event.preventDefault();
         if (!pending) onClose();
@@ -75,7 +79,7 @@ export function RejectDialog({
       <h2 id={titleId} className="text-display-sm font-semibold">
         Reject {itemLabel}
       </h2>
-      <p className="mt-1 text-body-sm text-body">
+      <p id={descriptionId} className="mt-1 text-body-sm text-body">
         The contributor sees this note with the rejected contribution.
       </p>
 
@@ -116,18 +120,18 @@ export function RejectDialog({
           maxLength={2000}
           value={note}
           onChange={(event) => onNoteChange(event.target.value)}
-          aria-describedby={error ? errorId : undefined}
+          aria-describedby={describedBy}
           aria-invalid={error ? true : undefined}
           className={cn(
             "w-full resize-y rounded-md bg-surface px-3 py-2 text-body-sm text-ink",
-            "shadow-elev-1 outline-none",
+            "shadow-elev-1",
             "transition-colors duration-150 ease-[var(--ease-out-quart)]",
             error && "ring-1 ring-error",
           )}
         />
         <div className="flex flex-wrap items-center justify-between gap-2 text-caption text-mute">
           <span>{note.trim().length} characters</span>
-          <span>At least 3 characters</span>
+          <span id={hintId}>At least 3 characters</span>
         </div>
         {error ? (
           <p id={errorId} role="alert" className="text-caption text-error">

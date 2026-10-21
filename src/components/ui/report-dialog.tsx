@@ -34,6 +34,7 @@ export function ReportDialog({
   const dialogRef = useRef<HTMLDialogElement>(null);
   const noteRef = useRef<HTMLTextAreaElement | null>(null);
   const titleId = useId();
+  const descriptionId = useId();
   const errorId = useId();
 
   useEffect(() => {
@@ -50,6 +51,7 @@ export function ReportDialog({
     <dialog
       ref={dialogRef}
       aria-labelledby={titleId}
+      aria-describedby={descriptionId}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -60,7 +62,9 @@ export function ReportDialog({
       <h2 id={titleId} className="text-display-sm font-semibold">
         {title}
       </h2>
-      <p className="mt-2 text-body-sm text-body">{description}</p>
+      <p id={descriptionId} className="mt-2 text-body-sm text-body">
+        {description}
+      </p>
 
       <form
         className="mt-4 flex flex-col gap-3"
@@ -83,13 +87,13 @@ export function ReportDialog({
           aria-invalid={error ? true : undefined}
           className={cn(
             "w-full resize-y rounded-md bg-surface px-3 py-2 text-body-sm text-ink",
-            "shadow-elev-1 outline-none",
+            "shadow-elev-1",
             "transition-colors duration-150 ease-[var(--ease-out-quart)]",
             error && "ring-1 ring-error",
           )}
         />
         {error ? (
-          <p id={errorId} className="text-caption text-error">
+          <p id={errorId} role="alert" className="text-caption text-error">
             {error}
           </p>
         ) : null}

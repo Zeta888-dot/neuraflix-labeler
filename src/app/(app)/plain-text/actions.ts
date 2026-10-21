@@ -9,6 +9,10 @@ import {
   plainTextHash,
   plainTextSubmissionSchema,
 } from "@/lib/khowar";
+import {
+  RATE_LIMIT_MESSAGE,
+  isRateLimitError,
+} from "@/lib/rate-limit";
 import type {
   PlainTextPageResult,
   PlainTextSubmitInput,
@@ -71,6 +75,9 @@ export async function submitPlainText(
 
   if (error) {
     logRpcError("[submit_text]", error);
+    if (isRateLimitError(error)) {
+      return { status: "error", message: RATE_LIMIT_MESSAGE };
+    }
     if (error.code === "23505") {
       return {
         status: "duplicate",

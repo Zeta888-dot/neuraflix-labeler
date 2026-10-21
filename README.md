@@ -10,7 +10,7 @@ Next.js 16 (App Router), TypeScript, Tailwind v4, Supabase (Postgres, Auth, Stor
 
 1. `npm install`
 2. Copy `.env.example` to `.env.local` and fill in the values.
-3. Run the migrations in `supabase/migrations/` in the Supabase SQL editor, in order: `0001_init.sql` to `0008_admin_settings.sql`.
+3. Run the migrations in `supabase/migrations/` in the Supabase SQL editor, in order: `0001_init.sql` to `0009_hardening.sql`.
 4. `npm run dev`, then open http://localhost:3000
 
 ## Environment variables
@@ -22,6 +22,8 @@ Names only:
 - `SUPABASE_SERVICE_ROLE_KEY`
 
 The service role key is read only by `scripts/` and is never imported by `src/` or logged. The OCR quota is not an environment variable. Its only source is `app_settings.ocr_quota_mb`.
+
+The keep-alive workflow uses the GitHub repository variable `HEALTH_URL`, set to the deployed `/api/health` URL. It is not an app environment variable.
 
 ## Scripts
 
@@ -42,9 +44,11 @@ The service role key is read only by `scripts/` and is never imported by `src/` 
 
 `export`, `sync` and `purge:ocr` are local scripts. They never run from the web app. Sync never deletes remote objects. Purge is the only command that does.
 
+`GET /api/health` calls `health_ping()` and returns `{ok:true}` or 503. The keep-alive workflow in `.github/workflows/keep-alive.yml` pings it every 3 days. `supabase/cleanup/launch-reset.sql` is a manual pre-launch reset, not a migration; run `npm run purge:ocr` first and read its header before using it.
+
 ## Phases
 
-L0 to L6 are done. L7 has not started. See `HANDOFF.md` for the manual L6 order, the waived `--include-unreviewed` and `--push-hf` flags, and the sync and purge deviation from `LABELER.md` section 9.
+L0 to L6 are done. L7a code hardening is complete. L7b (hosting, Google login, SMTP and the neuraflix.si integration) has not started. See `HANDOFF.md` for the `0009_hardening.sql` step, the `HEALTH_URL` variable, the launch reset usage, the manual L6 order and the waived flags.
 
 ## Data policy
 

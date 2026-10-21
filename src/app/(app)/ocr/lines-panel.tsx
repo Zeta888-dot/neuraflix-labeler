@@ -130,7 +130,7 @@ export function LinesPanel({
                 value={splitY}
                 autoFocus
                 onChange={(event) => onSplitYChange(Number(event.target.value))}
-                className="h-11 w-28 rounded-md bg-surface px-3 text-body-sm text-ink shadow-elev-1 outline-none"
+                className="h-11 w-28 rounded-md bg-surface px-3 text-body-sm text-ink shadow-elev-1"
               />
             </div>
             <Button

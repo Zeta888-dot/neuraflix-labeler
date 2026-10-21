@@ -22,7 +22,7 @@ export function ThemeToggle() {
       onClick={() => applyTheme(theme === "light" ? "dark" : "light")}
       aria-label={label}
       title={label}
-      className="inline-flex size-9 items-center justify-center rounded-full text-body shadow-elev-1 transition-colors hover:text-ink hover:bg-surface-2"
+      className="inline-flex size-9 items-center justify-center rounded-full text-body shadow-elev-1 transition-colors hover:text-ink hover:bg-surface-2 pointer-coarse:size-11"
     >
       {theme === "light" ? (
         <Moon size={18} weight="light" aria-hidden="true" />

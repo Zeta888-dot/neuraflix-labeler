@@ -277,7 +277,7 @@ export function PlainTextWorkspace({
           <h2
             ref={successRef}
             tabIndex={-1}
-            className="mt-3 text-display-sm font-semibold text-ink outline-none"
+            className="mt-3 text-display-sm font-semibold text-ink"
           >
             Text submitted
           </h2>

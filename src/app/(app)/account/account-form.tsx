@@ -33,8 +33,13 @@ export function AccountForm({
           autoComplete="nickname"
           defaultValue={initialDisplayName}
           placeholder="How your name appears in the sidebar"
+          aria-describedby={
+            state.message
+              ? "display_name_hint display_name_status"
+              : "display_name_hint"
+          }
         />
-        <p className="text-caption text-mute">
+        <p id="display_name_hint" className="text-caption text-mute">
           Optional. It is shown in the sidebar and in your account menu, and it
           is the only personal detail stored besides your email address.
         </p>
@@ -42,6 +47,7 @@ export function AccountForm({
 
       {state.message ? (
         <p
+          id="display_name_status"
           role={state.status === "error" ? "alert" : "status"}
           className={
             state.status === "error"

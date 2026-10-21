@@ -147,7 +147,7 @@ export function DetectionPanel({
             }
             className={cn(
               "inline-flex h-11 min-w-11 shrink-0 items-center justify-end rounded-full",
-              "outline-none transition-colors duration-150 ease-[var(--ease-out-quart)]",
+              "transition-colors duration-150 ease-[var(--ease-out-quart)]",
             )}
           >
             <span
