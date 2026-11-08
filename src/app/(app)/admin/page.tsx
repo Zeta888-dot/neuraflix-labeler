@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { Badge } from "@/components/ui/badge";
+import { buttonClasses } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { CopyButton } from "@/components/ui/copy-button";
 import { EmptyState, PageHeader } from "@/components/ui/page";
@@ -132,7 +134,7 @@ async function AdminLoader() {
         <CardTitle>Import English items</CardTitle>
         <p className="mt-1 text-body-sm text-body">
           Run this in the project folder. It reads the service role key from
-          .env.local, and nothing in the web app can import items.
+          .env.local. The admin upload panel is the browser alternative.
         </p>
 
         <div className="mt-4 flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2">
@@ -144,6 +146,19 @@ async function AdminLoader() {
             label="Copy the import command"
             className="-my-1 shrink-0"
           />
+        </div>
+
+        <div className="mt-4">
+          <Link
+            href="/admin/upload"
+            className={buttonClasses({ variant: "secondary", size: "sm" })}
+          >
+            Open the browser upload panel
+          </Link>
+          <p className="mt-2 text-caption text-mute">
+            Load .json, .jsonl or .csv files in chunks and resume by selecting
+            the same file.
+          </p>
         </div>
 
         <div className="mt-4 flex flex-col gap-3 text-body-sm text-body">

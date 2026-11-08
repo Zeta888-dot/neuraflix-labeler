@@ -63,6 +63,7 @@ export function KhowarField({
   singleLine = false,
   onKeyDown,
   showCount = true,
+  inputClassName,
   textareaClassName,
 }: {
   id: string;
@@ -85,6 +86,8 @@ export function KhowarField({
   ) => void;
   /** The plain text form shows its own stats row instead. */
   showCount?: boolean;
+  /** Replaces the one-line input height, padding and text size classes. */
+  inputClassName?: string;
   /** Extra classes for the textarea, such as a minimum height. */
   textareaClassName?: string;
 }) {
@@ -170,13 +173,13 @@ export function KhowarField({
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy}
           className={cn(
-            "script-nastaliq h-11 w-full rounded-md bg-surface px-3 text-body-md text-ink",
+            "script-nastaliq w-full rounded-md bg-surface text-ink",
             "shadow-elev-1",
             "transition-colors duration-150 ease-[var(--ease-out-quart)]",
             "hover:border-hairline-strong",
             "disabled:cursor-not-allowed disabled:opacity-60",
             error && "ring-1 ring-error",
-            textareaClassName,
+            inputClassName ?? "h-11 px-3 text-body-md",
           )}
         />
       ) : (

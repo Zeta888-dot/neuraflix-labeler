@@ -7,6 +7,7 @@ import {
   SealCheck,
   SquaresFour,
   TextT,
+  UploadSimple,
   UserCircle,
   type Icon,
 } from "@phosphor-icons/react";
@@ -18,6 +19,8 @@ export type NavItem = {
   icon: Icon;
   /** When set, only these roles see the item. */
   roles?: Role[];
+  /** When true, only the exact path is active, not its children. */
+  exact?: boolean;
 };
 
 export const navItems: NavItem[] = [
@@ -32,7 +35,19 @@ export const navItems: NavItem[] = [
     icon: SealCheck,
     roles: ["reviewer", "admin"],
   },
-  { href: "/admin", label: "Admin", icon: GearSix, roles: ["admin"] },
+  {
+    href: "/admin",
+    label: "Admin",
+    icon: GearSix,
+    roles: ["admin"],
+    exact: true,
+  },
+  {
+    href: "/admin/upload",
+    label: "Upload",
+    icon: UploadSimple,
+    roles: ["admin"],
+  },
   { href: "/guidelines", label: "Guidelines", icon: BookOpen },
   { href: "/account", label: "Account", icon: UserCircle },
 ];
@@ -41,6 +56,11 @@ export function visibleNavItems(role: Role): NavItem[] {
   return navItems.filter((item) => !item.roles || item.roles.includes(role));
 }
 
-export function isActivePath(pathname: string, href: string): boolean {
+export function isActivePath(
+  pathname: string,
+  href: string,
+  exact = false,
+): boolean {
+  if (exact) return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
 }

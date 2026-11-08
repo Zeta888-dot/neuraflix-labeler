@@ -1,6 +1,6 @@
 # Handoff
 
-Status: L0 to L6 are implemented. L7a (code hardening) is complete in code. L7b (hosting, Google login, SMTP and the neuraflix.si integration) has not started. `0009_hardening.sql` is written but not applied.
+Status: L0 to L7a are implemented. L8a (admin text import) and the L8b labeling, translation layout and photo straightening work are in the working tree, uncommitted. `0009_hardening.sql` and `0010_import_text.sql` are written but are not applied by this repo.
 
 ## How to run
 
@@ -16,8 +16,9 @@ Environment variable names only: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABA
 1. Project settings, API: copy the project URL, anon key and service role key into `.env.local`. Never commit or print them.
 2. Authentication: keep the email magic link and add `/auth/callback` for the local and deployed origins.
 3. Migration: `0007_review.sql` is confirmed applied. Apply `0008_admin_settings.sql` if it is not applied yet. Then paste `supabase/migrations/0009_hardening.sql` into the Supabase SQL editor and Run. It is safe to run again. Nothing in this repo applies it.
-4. `0009` adds the submission rate limits, the plain text trigger, `health_ping()` and its grants. Until it is applied, `/api/health` returns 503 and the new limits are not enforced.
-5. The first admin already exists. Later role changes use Admin, Users, or SQL:
+4. Apply `supabase/migrations/0010_import_text.sql` for the admin text import if it is not applied yet. It is safe to run again and is not applied by this repo.
+5. `0009` adds the submission rate limits, the plain text trigger, `health_ping()` and its grants. Until it is applied, `/api/health` returns 503 and the new limits are not enforced.
+6. The first admin already exists. Later role changes use Admin, Users, or SQL:
 
 ```sql
 update public.profiles p set role = 'reviewer'
@@ -32,6 +33,46 @@ update public.profiles p set role = 'reviewer'
 - The keep-alive workflow is `.github/workflows/keep-alive.yml`. It runs every 3 days and by hand. Set the repository variable `HEALTH_URL` under Settings, Secrets and variables, Actions, Variables, to `https://<host>/api/health`. A non-200 response fails the job.
 - `supabase/cleanup/launch-reset.sql` is not a migration. Run `npm run purge:ocr` first, because deleting OCR rows removes the only map to the Storage objects. Review the counts with the default ROLLBACK, fill in the explicit test id blocks only for confirmed test rows, then change the last statement to COMMIT. Never run it against real contributor data.
 - Tests: `test:core` 81, `test:ocr` 22, `test:export` 28. Lint and build pass. Browser checks for focus, 360px layout and reduced motion are still manual.
+
+## L8a admin text import
+
+- `0010_import_text.sql` adds `import_batches`, `import_sources`, `import_source_chunks` and `import_source_errors`, plus the admin RPCs. RLS and grants keep the tables closed to direct app writes.
+- The admin Upload screen reads JSONL or CSV locally, hashes the file, and sends one chunk at a time. Only the prepared chunk rows cross the wire. The original file is never stored.
+- A chunk is one transaction. Duplicate `english_hash` rows are skipped, invalid rows are logged in `import_source_errors`, and neither rolls back the valid rows. Committing the same chunk again is idempotent, and resume checks the hash of the last committed byte slice.
+- Create fix: `admin_import_create_source` returns the new id as `source_id`, while `admin_import_sources` returns it as `id`. `parseImportSource` now accepts both. Before the fix the source row was created as Active at offset 0, but the client read the create response as a parse failure and showed "The import request failed. Try again.", so the first chunk could never load.
+- Failed RPCs log the RPC name, message, code and hint. Details are left out because PostgreSQL can put row values there. Parse failures log `UPLOAD_PARSE`, and the admin message carries a short safe code.
+- Regression coverage: `src/lib/admin/upload/parse.test.ts` checks create (`source_id`), list (`id`) and chunk counter payloads.
+
+Manual check: on a fresh source, select `test-instructions.jsonl` and load the chunk. Expect 7 loaded, 1 duplicate skipped and 2 invalid, and the instructions count to go from 0 to 7. Reselect the same file and confirm no duplicates. Reload after a committed chunk and confirm resume starts at the saved position.
+
+## L8b label step
+
+- The Label step no longer shows the page map. The label card spans the full content width, and the Lines list and Page details sit below it in a two-column row on desktop. Check lines still shows the page preview with its line boxes.
+- Focus mode collapses the sidebar from the Label step. It uses the existing `nf-sidebar-collapsed` localStorage preference, so the choice survives reloads and matches the sidebar collapse button. The control is offered at desktop widths, where the sidebar exists.
+- The line image fills the card width at 1x. 2x stays horizontally scrollable, and Contrast is unchanged. The image area is taller than before on large screens.
+- The one-line Khowar field is larger: 56px high, 18px type and wider padding. Enter still saves and advances, Alt + Left and Alt + Right still move, and Escape still returns focus to the field.
+- On mobile the label card, Lines list and Page details stack in one column. The Lines list keeps its own scroll area.
+
+Manual check: open the Label step and confirm the page map is gone, the label card uses the full width, and the Lines list and Page details are reachable below. Turn Focus mode on, reload, and confirm the sidebar stays collapsed. Check 1x, 2x and Contrast on a long and a short line, the larger Khowar field, and all four shortcuts. Repeat at 360px with the sidebar drawer closed.
+
+## L8b translation layouts
+
+- Instructions: the read-only English card now sits on top and the Khowar card runs the full width below at every breakpoint. Before this change they were side by side from `lg`.
+- Conversations: each turn already places the English turn above its full-width Khowar field, so the layout was already the requested stack.
+- Draft autosave and restore, validation and warnings, Ctrl + Enter, Skip, Report and the review flow are unchanged.
+
+Manual check: open Instructions and confirm English is above Khowar with Khowar spanning the full form width at desktop and 360px. In Conversations, confirm every turn reads English first and its Khowar field below. Type a few fields, reload, and confirm the draft comes back; submit one item and confirm the next item loads.
+
+## L8b photo straightening
+
+- The OCR flow now has five steps: Upload, Straighten, Check lines, Label and Submit. After an image is decoded, the Straighten step opens instead of starting line detection. Apply or Skip runs detection on the chosen working copy.
+- The original file is decoded once with EXIF orientation and stays in this browser. Nothing from this step is uploaded.
+- Four pointer and keyboard corner handles start from lightweight page-edge detection and fall back to a small image inset when no page is found confidently. The rotate slider covers -8 to 8 degrees and starts at the detected text tilt.
+- Apply runs the pure-TS four-point homography in `src/lib/ocr/straighten.ts` through a canvas warp, caps the working copy at 3000 px on the long edge, and shows Before and After. Use this page commits the result, Back to corners keeps editing, and Skip runs detection on the untouched page.
+- Applied corners and rotation are saved in the local OCR draft and replayed on the original file when the draft resumes, so saved line boxes stay aligned. A recovered preview also replays the setting.
+- `src/lib/ocr/straighten.test.ts` covers homography round trips, output sizing, quad validation, page-corner detection and deskew angle detection. It runs in `test:ocr` and `test:core`.
+
+Manual check: upload a tilted phone photo and confirm the Straighten step appears. Drag each corner by touch and with the arrow keys, check auto deskew and the slider, then Apply and compare Before with After. Use this page and confirm the line boxes follow the straightened image. Try Skip on a flat scan, Replace during the step, and reload a saved draft to confirm straightening replays.
 
 ## L6 commands
 
@@ -85,6 +126,12 @@ A split file is created only when that split has rows. `manifest.json` is writte
 - `--include-unreviewed` and `--push-hf` remain waived. Offsite backup is a manual copy of `data/` for now.
 
 ## Manual checks still open
+
+L8a: select `test-instructions.jsonl` on a fresh source, load the chunk, confirm 7 loaded / 1 skipped / 2 invalid, open Instructions and confirm 0 to 7, then reselect and confirm no duplicates.
+
+L8b: on the Label step, confirm no page map, a full-width label card, and the Lines and Page details panels below it. Toggle Focus mode, reload and confirm the sidebar stays collapsed. Check 1x, 2x, Contrast, the larger Khowar field, Enter, Alt + Left/Right and Escape at desktop and 360px. On Instructions and Conversations, confirm English sits above a full-width Khowar field at every width.
+
+L8b straighten: upload a tilted phone photo, confirm the Straighten step opens, drag all four corners by touch and arrow keys, check the detected deskew and slider, Apply and compare Before with After, then Use this page and confirm the line boxes follow the straightened image. Try Skip, Replace and a draft reload.
 
 L6: run `npm run sync` (dry run), then `sync --commit` for one approved page, `export --dry-run`, `export`, `purge:ocr` and `purge:ocr --commit` for the same page. Check `exports/<timestamp>/` and `data/ocr/<page_uuid>/manifest.json`. If credentials or approved test records are unavailable, mark these blocked instead of using real user data.
 

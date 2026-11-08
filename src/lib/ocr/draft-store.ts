@@ -4,6 +4,12 @@ import {
   type SegParams,
 } from "./segment-core";
 import type { LineDraft } from "./labels";
+import {
+  clampRotation,
+  type Point,
+  type Quad,
+  type StraightenSettings,
+} from "./straighten";
 
 /**
  * One OCR draft per signed-in user, kept in IndexedDB in this browser only.
@@ -46,6 +52,8 @@ export type OcrDraft = {
   currentLine: number;
   pageLabel: string;
   rightsConfirmed: boolean;
+  /** The applied page straightening, replayed on the original file on resume. */
+  straighten: StraightenSettings | null;
   /** Present while a page is uploading or waiting for finalize. */
   submission: OcrSubmission | null;
 };
@@ -86,6 +94,26 @@ function isLineDraft(value: unknown): value is LineDraft {
       value.status === "labeled" ||
       value.status === "unreadable")
   );
+}
+
+function isPoint(value: unknown): value is Point {
+  return (
+    isRecord(value) && isFiniteNumber(value.x) && isFiniteNumber(value.y)
+  );
+}
+
+function parseStraighten(value: unknown): StraightenSettings | null {
+  if (!isRecord(value)) return null;
+  if (!Array.isArray(value.corners) || value.corners.length !== 4) return null;
+  if (!value.corners.every(isPoint)) return null;
+  if (!isFiniteNumber(value.rotation)) return null;
+
+  const corners = value.corners.map((point: Point) => ({
+    x: point.x,
+    y: point.y,
+  })) as Quad;
+
+  return { corners, rotation: clampRotation(value.rotation) };
 }
 
 function parseSubmission(value: unknown): OcrSubmission | null {
@@ -134,6 +162,10 @@ function parseDraft(raw: unknown): OcrDraft | null {
     currentLine: Math.max(0, Math.trunc(raw.currentLine)),
     pageLabel: raw.pageLabel.slice(0, 120),
     rightsConfirmed: raw.rightsConfirmed,
+    straighten:
+      raw.straighten === undefined || raw.straighten === null
+        ? null
+        : parseStraighten(raw.straighten),
     submission:
       raw.submission === undefined || raw.submission === null
         ? null

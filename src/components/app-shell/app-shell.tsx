@@ -214,7 +214,7 @@ function SidebarContent({
         <ul className="flex flex-col gap-0.5">
           {items.map((item) => {
             const Icon: Icon = item.icon;
-            const active = isActivePath(pathname, item.href);
+            const active = isActivePath(pathname, item.href, item.exact);
             return (
               <li key={item.href}>
                 <Link

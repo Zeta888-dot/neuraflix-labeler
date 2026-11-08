@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "zro/deepseek-v4.1-flash",
+  "provider": {
+    "zro": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Zro",
+      "options": {
+        "baseURL": "https://zro.moonmath.ai/v1"
+      },
+      "models": {
+        "deepseek-v4.1-flash": {
+          "name": "DeepSeek V4.1 Flash (Zro)"
+        },
+        "glm-5.3-flash": {
+          "name": "GLM 5.3 Flash (Zro)"
+        }
+      }
+    }
+  }
+}

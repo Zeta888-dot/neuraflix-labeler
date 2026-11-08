@@ -348,7 +348,7 @@ export function InstructionsWorkspace({
             }
           }}
         >
-          <div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
+          <div className="flex flex-col gap-4 lg:gap-6">
             <EnglishPanel item={claim.item} />
 
             <Card className="flex flex-col gap-5">

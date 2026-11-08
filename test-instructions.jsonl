@@ -1,0 +1,10 @@
+{"instruction":"Translate this greeting into a polite form.","input":"Good morning, how are you?","response":"Good morning, I am well, thank you."}
+{"instruction":"Name the capital city of Pakistan.","response":"The capital of Pakistan is Islamabad."}
+{"instruction":"Explain what a river is in one sentence.","response":"A river is a large natural stream of water flowing toward a sea, lake or another river."}
+{"instruction":"Give an example of a fruit that grows on trees.","response":"An apple is a fruit that grows on trees."}
+{"instruction":"Describe the season of winter briefly.","input":"Focus on temperature.","response":"Winter is the coldest season, with low temperatures and shorter days."}
+{"instruction":"What is the opposite of the word big?","output":"The opposite of big is small."}
+{"instruction":"Write a short thank you note to a teacher.","response":"Thank you for your patience and guidance this year."}
+{"instruction":"Translate this greeting into a polite form.","input":"Good morning, how are you?","response":"Good morning, I am well, thank you."}
+{"instruction":"This row has no response field at all."}
+{"instruction":"","response":"This row has an empty instruction."}

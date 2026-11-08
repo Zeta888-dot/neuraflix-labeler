@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowsOutSimple,
   ArrowLeft,
   ArrowRight,
   Check,
@@ -11,9 +12,14 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent,
 } from "react";
+import {
+  readCollapsed,
+  subscribeCollapsed,
+  writeCollapsed,
+} from "@/components/app-shell/sidebar-preference";
 import { KhowarField } from "@/components/khowar/KhowarField";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -92,6 +98,11 @@ export function LabelingView({
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "empty" | "unreadable">("all");
   const fieldRef = useRef<HTMLInputElement | null>(null);
+  const focusMode = useSyncExternalStore(
+    subscribeCollapsed,
+    readCollapsed,
+    () => false,
+  );
 
   function focusCurrentField() {
     focusField(fieldRef.current);
@@ -196,24 +207,34 @@ export function LabelingView({
   }
 
   return (
-    <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start xl:grid-cols-[minmax(0,1fr)_400px]">
-      <div className="min-w-0">
-        <section
-          className="rounded-lg bg-surface p-4 shadow-elev-2 sm:p-6"
-          aria-labelledby="ocr-label-heading"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2
-                id="ocr-label-heading"
-                className="text-body-md font-medium text-ink"
-              >
-                Label the line
-              </h2>
-              <p className="text-caption tabular-nums text-mute">
-                {safeCurrent + 1} of {total}
-              </p>
-            </div>
+    <div className="mt-4 flex flex-col gap-4">
+      <section
+        className="rounded-lg bg-surface p-4 shadow-elev-2 sm:p-6"
+        aria-labelledby="ocr-label-heading"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2
+              id="ocr-label-heading"
+              className="text-body-md font-medium text-ink"
+            >
+              Label the line
+            </h2>
+            <p className="text-caption tabular-nums text-mute">
+              {safeCurrent + 1} of {total}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              className="hidden h-11 sm:h-10 lg:inline-flex"
+              aria-pressed={focusMode}
+              onClick={() => writeCollapsed(!focusMode)}
+            >
+              <ArrowsOutSimple size={16} weight="light" aria-hidden="true" />
+              {focusMode ? "Exit focus mode" : "Focus mode"}
+            </Button>
             <Button
               type="button"
               variant="secondary"
@@ -224,200 +245,179 @@ export function LabelingView({
               Back to lines
             </Button>
           </div>
+        </div>
 
-          <div className="mt-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-caption text-body">
-              <span
-                role="status"
-                aria-live="polite"
-                className="font-medium text-ink"
-              >
-                Line {safeCurrent + 1} of {total}
-              </span>
-              <span className="tabular-nums">{progressText}</span>
-            </div>
-            <div
-              role="progressbar"
-              aria-label="Labeling progress"
-              aria-valuemin={0}
-              aria-valuemax={total}
-              aria-valuenow={done}
-              aria-valuetext={progressText}
-              className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-2"
+        <div className="mt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-caption text-body">
+            <span
+              role="status"
+              aria-live="polite"
+              className="font-medium text-ink"
             >
-              <div
-                className="h-full rounded-full bg-accent transition-[width] duration-200 ease-[var(--ease-out-quart)]"
-                style={{ width: `${percent}%` }}
-              />
-            </div>
+              Line {safeCurrent + 1} of {total}
+            </span>
+            <span className="tabular-nums">{progressText}</span>
           </div>
-
-          <LineImage
-            page={page}
-            line={line}
-            index={safeCurrent}
-            total={total}
-          />
-
-          <div className="mt-4">
-            <KhowarField
-              id="ocr-line-label"
-              label="Line text"
-              value={line.label}
-              onChange={(value) => {
-                setError(null);
-                onLineChange(safeCurrent, value);
-              }}
-              singleLine
-              inputRef={fieldRef}
-              error={error}
-              hint="Enter saves and moves to the next line."
-              onKeyDown={handleFieldKeyDown}
-            />
-            {line.status === "unreadable" ? (
-              <p className="mt-2 text-caption text-body">
-                This line is marked unreadable. Typing in the field clears that
-                mark.
-              </p>
-            ) : null}
-            <p className="mt-2 text-caption text-mute">
-              Alt + Left and Alt + Right move between lines. Escape returns to
-              this field.
-            </p>
-          </div>
-
-          <div className="sticky bottom-0 z-20 -mx-4 mt-5 border-t border-hairline bg-canvas/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none">
-            <div className="flex items-center justify-between gap-2 text-caption text-body lg:hidden">
-              <span className="tabular-nums">
-                Line {safeCurrent + 1} of {total}
-              </span>
-              <span className="tabular-nums">{progressText}</span>
-            </div>
-
-            <div className="mt-2 grid grid-cols-2 gap-2 lg:mt-0 lg:flex lg:flex-wrap">
-              <Button
-                type="button"
-                variant="secondary"
-                className="h-11 sm:h-10"
-                onClick={() => go(previousLineIndex(safeCurrent, total))}
-                disabled={safeCurrent === 0}
-              >
-                <ArrowLeft size={16} weight="light" aria-hidden="true" />
-                Previous
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                className="h-11 sm:h-10"
-                onClick={() => go(nextLineIndex(safeCurrent, total))}
-                disabled={safeCurrent === total - 1}
-              >
-                Next
-                <ArrowRight size={16} weight="light" aria-hidden="true" />
-              </Button>
-              <Button
-                type="button"
-                className="col-span-2 h-11 sm:col-span-1 sm:h-10"
-                onClick={saveAndAdvance}
-              >
-                <Check size={16} weight="light" aria-hidden="true" />
-                Save and next
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                className={cn(
-                  "h-11 sm:h-10",
-                  line.status === "unreadable" &&
-                    "outline outline-2 outline-accent",
-                )}
-                aria-pressed={line.status === "unreadable"}
-                aria-label={
-                  line.status === "unreadable"
-                    ? "Remove the unreadable mark"
-                    : "Mark the line as unreadable"
-                }
-                onClick={() => {
-                  setError(null);
-                  onToggleUnreadable(safeCurrent);
-                }}
-              >
-                <EyeSlash size={16} weight="light" aria-hidden="true" />
-                <span className="sm:hidden">Unreadable</span>
-                <span className="hidden sm:inline">Mark as unreadable</span>
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                className="h-11 sm:h-10"
-                onClick={() => {
-                  setError(null);
-                  onClearLine(safeCurrent);
-                  focusCurrentField();
-                }}
-              >
-                <X size={16} weight="light" aria-hidden="true" />
-                Clear
-              </Button>
-            </div>
-          </div>
-
-          {progress.empty === 0 ? (
-            <section
-              aria-labelledby="ocr-summary-heading"
-              className="mt-5 rounded-md bg-accent-soft p-4"
-            >
-              <h2
-                id="ocr-summary-heading"
-                className="text-body-md font-medium text-ink"
-              >
-                All lines have a label or are marked unreadable
-              </h2>
-              <p className="mt-1 text-caption text-body">
-                {progress.labeled} labeled, {progress.unreadable} unreadable.
-              </p>
-              <Button
-                type="button"
-                className="mt-3 h-11 sm:h-10"
-                onClick={onContinue}
-                disabled={!gate.canSubmit}
-                aria-describedby="ocr-submit-reason"
-              >
-                Continue to submit
-              </Button>
-              <p id="ocr-submit-reason" className="mt-2 text-caption text-mute">
-                {gate.canSubmit
-                  ? "Step 4 shows what will be uploaded before anything leaves this browser."
-                  : gate.reason}
-              </p>
-            </section>
-          ) : null}
-        </section>
-      </div>
-
-      <aside className="flex min-w-0 flex-col gap-4">
-        <section
-          className="rounded-lg bg-surface p-4 shadow-elev-2 sm:p-6"
-          aria-labelledby="ocr-minimap-heading"
-        >
-          <h2
-            id="ocr-minimap-heading"
-            className="text-body-md font-medium text-ink"
+          <div
+            role="progressbar"
+            aria-label="Labeling progress"
+            aria-valuemin={0}
+            aria-valuemax={total}
+            aria-valuenow={done}
+            aria-valuetext={progressText}
+            className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-2"
           >
-            Page map
-          </h2>
-          <p className="mt-1 text-caption text-mute">
-            Click a box to jump to that line. The lines list is the keyboard
-            path.
-          </p>
-          <PageMinimap
-            page={page}
-            lines={lines}
-            current={safeCurrent}
-            onSelect={go}
-          />
-        </section>
+            <div
+              className="h-full rounded-full bg-accent transition-[width] duration-200 ease-[var(--ease-out-quart)]"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+        </div>
 
+        <LineImage
+          page={page}
+          line={line}
+          index={safeCurrent}
+          total={total}
+        />
+
+        <div className="mt-4">
+          <KhowarField
+            id="ocr-line-label"
+            label="Line text"
+            value={line.label}
+            onChange={(value) => {
+              setError(null);
+              onLineChange(safeCurrent, value);
+            }}
+            singleLine
+            inputClassName="h-14 px-4 text-body-lg"
+            inputRef={fieldRef}
+            error={error}
+            hint="Enter saves and moves to the next line."
+            onKeyDown={handleFieldKeyDown}
+          />
+          {line.status === "unreadable" ? (
+            <p className="mt-2 text-caption text-body">
+              This line is marked unreadable. Typing in the field clears that
+              mark.
+            </p>
+          ) : null}
+          <p className="mt-2 text-caption text-mute">
+            Alt + Left and Alt + Right move between lines. Escape returns to
+            this field.
+          </p>
+        </div>
+
+        <div className="sticky bottom-0 z-20 -mx-4 mt-5 border-t border-hairline bg-canvas/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none">
+          <div className="flex items-center justify-between gap-2 text-caption text-body lg:hidden">
+            <span className="tabular-nums">
+              Line {safeCurrent + 1} of {total}
+            </span>
+            <span className="tabular-nums">{progressText}</span>
+          </div>
+
+          <div className="mt-2 grid grid-cols-2 gap-2 lg:mt-0 lg:flex lg:flex-wrap">
+            <Button
+              type="button"
+              variant="secondary"
+              className="h-11 sm:h-10"
+              onClick={() => go(previousLineIndex(safeCurrent, total))}
+              disabled={safeCurrent === 0}
+            >
+              <ArrowLeft size={16} weight="light" aria-hidden="true" />
+              Previous
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="h-11 sm:h-10"
+              onClick={() => go(nextLineIndex(safeCurrent, total))}
+              disabled={safeCurrent === total - 1}
+            >
+              Next
+              <ArrowRight size={16} weight="light" aria-hidden="true" />
+            </Button>
+            <Button
+              type="button"
+              className="col-span-2 h-11 sm:col-span-1 sm:h-10"
+              onClick={saveAndAdvance}
+            >
+              <Check size={16} weight="light" aria-hidden="true" />
+              Save and next
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className={cn(
+                "h-11 sm:h-10",
+                line.status === "unreadable" &&
+                  "outline outline-2 outline-accent",
+              )}
+              aria-pressed={line.status === "unreadable"}
+              aria-label={
+                line.status === "unreadable"
+                  ? "Remove the unreadable mark"
+                  : "Mark the line as unreadable"
+              }
+              onClick={() => {
+                setError(null);
+                onToggleUnreadable(safeCurrent);
+              }}
+            >
+              <EyeSlash size={16} weight="light" aria-hidden="true" />
+              <span className="sm:hidden">Unreadable</span>
+              <span className="hidden sm:inline">Mark as unreadable</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-11 sm:h-10"
+              onClick={() => {
+                setError(null);
+                onClearLine(safeCurrent);
+                focusCurrentField();
+              }}
+            >
+              <X size={16} weight="light" aria-hidden="true" />
+              Clear
+            </Button>
+          </div>
+        </div>
+
+        {progress.empty === 0 ? (
+          <section
+            aria-labelledby="ocr-summary-heading"
+            className="mt-5 rounded-md bg-accent-soft p-4"
+          >
+            <h2
+              id="ocr-summary-heading"
+              className="text-body-md font-medium text-ink"
+            >
+              All lines have a label or are marked unreadable
+            </h2>
+            <p className="mt-1 text-caption text-body">
+              {progress.labeled} labeled, {progress.unreadable} unreadable.
+            </p>
+            <Button
+              type="button"
+              className="mt-3 h-11 sm:h-10"
+              onClick={onContinue}
+              disabled={!gate.canSubmit}
+              aria-describedby="ocr-submit-reason"
+            >
+              Continue to submit
+            </Button>
+            <p id="ocr-submit-reason" className="mt-2 text-caption text-mute">
+              {gate.canSubmit
+                ? "Step 4 shows what will be uploaded before anything leaves this browser."
+                : gate.reason}
+            </p>
+          </section>
+        ) : null}
+      </section>
+
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
         <section
           className="rounded-lg bg-surface p-4 shadow-elev-2 sm:p-6"
           aria-labelledby="ocr-lines-strip-heading"
@@ -567,7 +567,7 @@ export function LabelingView({
             images and labels are uploaded.
           </p>
         </section>
-      </aside>
+      </div>
     </div>
   );
 }
@@ -666,7 +666,7 @@ function LineImage({
 
       <div
         className={cn(
-          "mt-3 max-h-[min(45vh,360px)] overflow-auto rounded-md bg-surface-2 p-2",
+          "mt-3 max-h-[min(55vh,520px)] overflow-auto rounded-md bg-surface-2 p-2",
           drawError && "hidden",
         )}
       >
@@ -688,129 +688,6 @@ function LineImage({
           className="mt-3 rounded-md bg-surface-2 px-3 py-8 text-center text-body-sm text-body"
         >
           The line image could not be drawn. You can still type the label.
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function PageMinimap({
-  page,
-  lines,
-  current,
-  onSelect,
-}: {
-  page: PageView;
-  lines: LineDraft[];
-  current: number;
-  onSelect: (index: number) => void;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [themeTick, setThemeTick] = useState(0);
-  const [drawError, setDrawError] = useState(false);
-
-  useEffect(() => {
-    const observer = new MutationObserver(() =>
-      setThemeTick((tick) => tick + 1),
-    );
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["data-theme"],
-    });
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    let frame = 0;
-
-    try {
-      if (!isBitmapUsable(page.bitmap)) {
-        throw new Error("The page image is no longer available.");
-      }
-
-      const scale = Math.min(1, 420 / page.width);
-      const width = Math.max(1, Math.round(page.width * scale));
-      const height = Math.max(1, Math.round(page.height * scale));
-      if (canvas.width !== width) canvas.width = width;
-      if (canvas.height !== height) canvas.height = height;
-
-      const context = canvas.getContext("2d");
-      if (!context) return;
-
-      context.fillStyle = "#ffffff";
-      context.fillRect(0, 0, width, height);
-      context.drawImage(page.bitmap, 0, 0, width, height);
-
-      const styles = getComputedStyle(canvas);
-      const accent = styles.getPropertyValue("--accent").trim() || "#0070f3";
-      context.strokeStyle = accent;
-      context.lineWidth = 1.5;
-
-      lines.forEach((line, index) => {
-        const [x0, y0, x1, y1] = line.box;
-        const boxX = x0 * scale;
-        const boxY = y0 * scale;
-        const boxWidth = Math.max(1, (x1 - x0) * scale);
-        const boxHeight = Math.max(1, (y1 - y0) * scale);
-
-        if (index === current) {
-          context.globalAlpha = 0.18;
-          context.fillStyle = accent;
-          context.fillRect(boxX, boxY, boxWidth, boxHeight);
-          context.globalAlpha = 1;
-          context.lineWidth = 2.5;
-        } else {
-          context.lineWidth = 1;
-        }
-
-        context.strokeRect(boxX, boxY, boxWidth, boxHeight);
-      });
-    } catch {
-      frame = requestAnimationFrame(() => setDrawError(true));
-    }
-
-    return () => cancelAnimationFrame(frame);
-  }, [page, lines, current, themeTick]);
-
-  function handleClick(event: MouseEvent<HTMLCanvasElement>) {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    const x = (event.clientX - rect.left) * (page.width / rect.width);
-    const y = (event.clientY - rect.top) * (page.height / rect.height);
-
-    for (let index = lines.length - 1; index >= 0; index--) {
-      const [x0, y0, x1, y1] = lines[index].box;
-      if (x >= x0 && x <= x1 && y >= y0 && y <= y1) {
-        onSelect(index);
-        return;
-      }
-    }
-  }
-
-  return (
-    <div className="mt-3 flex flex-col items-center gap-2">
-      <canvas
-        ref={canvasRef}
-        role="img"
-        aria-label={`Page preview with ${lines.length} line boxes. Click a box to jump to that line.`}
-        onClick={handleClick}
-        className={cn(
-          "block h-auto max-h-[240px] w-auto max-w-full cursor-pointer rounded-xs bg-white shadow-elev-1",
-          drawError && "hidden",
-        )}
-      />
-      {drawError ? (
-        <p
-          role="status"
-          className="rounded-md bg-surface-2 px-3 py-4 text-center text-body-sm text-body"
-        >
-          The page map could not be drawn. Reload the page to try again.
         </p>
       ) : null}
     </div>

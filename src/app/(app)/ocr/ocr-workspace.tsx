@@ -53,6 +53,12 @@ import {
   validatePageFile,
   type SegmentPageResult,
 } from "@/lib/ocr/segmenter";
+import {
+  createStraightenedBitmap,
+  straightenErrorMessage,
+  type StraightenSource,
+} from "@/lib/ocr/straighten-image";
+import type { StraightenSettings } from "@/lib/ocr/straighten";
 import { createClient } from "@/lib/supabase/client";
 import { abortOcrPage, createOcrPage, finalizeOcrPage } from "./actions";
 import { ConfirmDialog } from "./confirm-dialog";
@@ -61,6 +67,7 @@ import { LabelingView } from "./labeling-view";
 import { LinesPanel } from "./lines-panel";
 import { OcrErrorBoundary } from "./ocr-error-boundary";
 import { PagePreview, type PageView } from "./page-preview";
+import { StraightenPanel } from "./straighten-panel";
 
 const DEBOUNCE_MS = 250;
 const DRAFT_SAVE_MS = 500;
@@ -74,7 +81,7 @@ const QUOTA_FULL_NOTICE =
   "OCR uploads are full for now. Plain text, instructions and conversations are still open.";
 
 type Busy = null | "load" | "detect";
-type Step = "review" | "label" | "submit";
+type Step = "review" | "straighten" | "label" | "submit";
 type HistoryEntry = { lines: LineDraft[]; selected: number; current: number };
 type SaveState =
   | null
@@ -270,6 +277,10 @@ export function OcrWorkspace({
     width: number;
     height: number;
   } | null>(null);
+  const [straightenSource, setStraightenSource] =
+    useState<StraightenSource | null>(null);
+  const [straightenSettings, setStraightenSettings] =
+    useState<StraightenSettings | null>(null);
 
   const [params, setParams] = useState<SegParams>(DEFAULT_PARAMS);
   const [lines, setLines] = useState<LineDraft[]>([]);
@@ -319,6 +330,8 @@ export function OcrWorkspace({
   const segmenterRef = useRef<PageSegmenter | null>(null);
   const bitmapRef = useRef<ImageBitmap | null>(null);
   const fileRef = useRef<Blob | null>(null);
+  const straightenSourceRef = useRef<StraightenSource | null>(null);
+  const straightenRef = useRef<StraightenSettings | null>(null);
   const recoveryRef = useRef(false);
   const loadTokenRef = useRef(0);
   const detectTokenRef = useRef(0);
@@ -424,6 +437,9 @@ export function OcrWorkspace({
         const bitmap = bitmapRef.current;
         bitmapRef.current = null;
         bitmap?.close();
+        const source = straightenSourceRef.current;
+        straightenSourceRef.current = null;
+        source?.bitmap.close();
       });
     };
   }, []);
@@ -471,6 +487,7 @@ export function OcrWorkspace({
         currentLine,
         pageLabel,
         rightsConfirmed: rights,
+        straighten: straightenSettings,
         submission,
       })
         .then((saved) => {
@@ -497,6 +514,7 @@ export function OcrWorkspace({
     currentLine,
     pageLabel,
     rights,
+    straightenSettings,
     submission,
     submitSuccess,
     userId,
@@ -511,6 +529,18 @@ export function OcrWorkspace({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [splitIndex]);
+
+  function storeStraightenSettings(next: StraightenSettings | null) {
+    straightenRef.current = next;
+    setStraightenSettings(next);
+  }
+
+  function releaseStraightenSource() {
+    const source = straightenSourceRef.current;
+    straightenSourceRef.current = null;
+    setStraightenSource(null);
+    source?.bitmap.close();
+  }
 
   const adoptPage = useCallback((result: SegmentPageResult): boolean => {
     if (!result.bitmap || !isBitmapUsable(result.bitmap)) return false;
@@ -604,20 +634,36 @@ export function OcrWorkspace({
     let adopted = false;
 
     try {
-      const bitmap = await decodePageFile(file);
+      let working = await decodePageFile(file);
       if (!mountedRef.current || token !== detectTokenRef.current) {
-        bitmap.close();
+        working.close();
         return;
+      }
+
+      const settings = straightenRef.current;
+      if (settings) {
+        const decoded = working;
+        try {
+          working = await createStraightenedBitmap(decoded, settings);
+          decoded.close();
+        } catch (caught) {
+          decoded.close();
+          throw caught;
+        }
+        if (!mountedRef.current || token !== detectTokenRef.current) {
+          working.close();
+          return;
+        }
       }
 
       try {
         segmenter = new PageSegmenter();
       } catch (caught) {
-        bitmap.close();
+        working.close();
         throw caught;
       }
 
-      const result = await segmenter.load(bitmap, nextParams);
+      const result = await segmenter.load(working, nextParams);
       if (!mountedRef.current || token !== detectTokenRef.current) {
         result.bitmap?.close();
         segmenter.dispose();
@@ -697,6 +743,8 @@ export function OcrWorkspace({
     retireBitmap(bitmapRef.current);
     bitmapRef.current = null;
     fileRef.current = null;
+    releaseStraightenSource();
+    storeStraightenSettings(null);
 
     setPage(null);
     setPageVersion((version) => version + 1);
@@ -773,11 +821,32 @@ export function OcrWorkspace({
     setDialog(null);
     setPendingFile(null);
 
+    const source: StraightenSource = {
+      bitmap,
+      width: bitmap.width,
+      height: bitmap.height,
+    };
+    straightenSourceRef.current = source;
+    setStraightenSource(source);
+    setStep("straighten");
+    setBusy(null);
+    setProgress("");
+  }
+
+  async function detectStraightenedPage(
+    working: ImageBitmap,
+    settings: StraightenSettings | null,
+  ): Promise<void> {
+    const token = loadTokenRef.current;
+    setBusy("load");
+    setProgress("Finding the lines");
+    setError(null);
+
     let segmenter: PageSegmenter;
     try {
       segmenter = new PageSegmenter();
     } catch (caught) {
-      bitmap.close();
+      working.close();
       setBusy(null);
       setProgress("");
       setError(
@@ -789,7 +858,6 @@ export function OcrWorkspace({
       return;
     }
 
-    segmenterRef.current = segmenter;
     segmenter.onProgress = (message) => {
       if (mountedRef.current && token === loadTokenRef.current) {
         setProgress(message);
@@ -797,7 +865,7 @@ export function OcrWorkspace({
     };
 
     try {
-      const result = await segmenter.load(bitmap, DEFAULT_PARAMS);
+      const result = await segmenter.load(working, DEFAULT_PARAMS);
       if (!mountedRef.current || token !== loadTokenRef.current) {
         result.bitmap?.close();
         segmenter.dispose();
@@ -805,17 +873,25 @@ export function OcrWorkspace({
       }
       if (!result.bitmap || !isBitmapUsable(result.bitmap)) {
         result.bitmap?.close();
+        segmenter.dispose();
         setBusy(null);
         setProgress("");
         setError("The page preview could not be created. Try another image.");
-        segmenter.dispose();
-        if (segmenterRef.current === segmenter) segmenterRef.current = null;
         return;
       }
+
+      segmenterRef.current?.dispose();
+      segmenterRef.current = segmenter;
+      appliedParamsRef.current = DEFAULT_PARAMS;
+      setParams(DEFAULT_PARAMS);
       applyDetection(result, []);
+      storeStraightenSettings(settings);
+      releaseStraightenSource();
       setBusy(null);
       setProgress("");
+      setStep("review");
     } catch (caught) {
+      segmenter.dispose();
       if (!mountedRef.current || token !== loadTokenRef.current) return;
       setBusy(null);
       setProgress("");
@@ -825,9 +901,40 @@ export function OcrWorkspace({
           "The page could not be processed. Try another image.",
         ),
       );
-      segmenter.dispose();
-      if (segmenterRef.current === segmenter) segmenterRef.current = null;
     }
+  }
+
+  async function skipStraightening(): Promise<void> {
+    const file = fileRef.current;
+    if (!file || busy === "load") return;
+
+    const token = loadTokenRef.current;
+    setBusy("load");
+    setProgress("Reading the page");
+    setError(null);
+
+    let bitmap: ImageBitmap;
+    try {
+      bitmap = await decodePageFile(file);
+    } catch (caught) {
+      if (!mountedRef.current || token !== loadTokenRef.current) return;
+      setBusy(null);
+      setProgress("");
+      setError(
+        segmenterErrorMessage(
+          caught,
+          "That image could not be opened. Try another file.",
+        ),
+      );
+      return;
+    }
+
+    if (!mountedRef.current || token !== loadTokenRef.current) {
+      bitmap.close();
+      return;
+    }
+
+    await detectStraightenedPage(bitmap, null);
   }
 
   function currentSubmitContext(): SubmitContext {
@@ -856,6 +963,7 @@ export function OcrWorkspace({
       currentLine: currentLineRef.current,
       pageLabel: context.label,
       rightsConfirmed: context.rights,
+      straighten: straightenRef.current,
       submission: record,
     });
   }
@@ -1367,11 +1475,36 @@ export function OcrWorkspace({
 
     const sourceSize = { width: bitmap.width, height: bitmap.height };
 
+    let working = bitmap;
+    if (draft.straighten) {
+      try {
+        working = await createStraightenedBitmap(bitmap, draft.straighten);
+        bitmap.close();
+      } catch (caught) {
+        bitmap.close();
+        if (!mountedRef.current || token !== loadTokenRef.current) return;
+        setDraftBusy(null);
+        setResumeMessage("");
+        setDraftActionError(
+          straightenErrorMessage(
+            caught,
+            "The saved straighten step could not be replayed. Discard this draft and upload the page again.",
+          ),
+        );
+        return;
+      }
+    }
+
+    if (!mountedRef.current || token !== loadTokenRef.current) {
+      working.close();
+      return;
+    }
+
     let segmenter: PageSegmenter;
     try {
       segmenter = new PageSegmenter();
     } catch (caught) {
-      bitmap.close();
+      working.close();
       setDraftBusy(null);
       setResumeMessage("");
       setDraftActionError(
@@ -1390,7 +1523,7 @@ export function OcrWorkspace({
     };
 
     try {
-      const result = await segmenter.load(bitmap, draft.params);
+      const result = await segmenter.load(working, draft.params);
       if (!mountedRef.current || token !== loadTokenRef.current) {
         result.bitmap?.close();
         segmenter.dispose();
@@ -1429,6 +1562,7 @@ export function OcrWorkspace({
       currentLineRef.current = restoredCurrent;
       pageLabelRef.current = draft.pageLabel;
       rightsRef.current = draft.rightsConfirmed;
+      storeStraightenSettings(draft.straighten);
       setParams(draft.params);
       setLines(restored);
       setDetectedBoxes(result.boxes);
@@ -1840,6 +1974,13 @@ export function OcrWorkspace({
 
   return (
     <div className="mt-6">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={handleInputChange}
+      />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <StepIndicator step={step} hasPage={page !== null} />
         <p
@@ -1886,7 +2027,7 @@ export function OcrWorkspace({
         </p>
       ) : null}
 
-      {error && step === "review" ? (
+      {error && (step === "review" || step === "straighten") ? (
         <div
           role="alert"
           className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface px-3 py-2 text-body-sm text-error shadow-elev-1"
@@ -1985,6 +2126,42 @@ export function OcrWorkspace({
       </ConfirmDialog>
 
       {draftCheck === "checking" ? <DraftCheckCard /> : null}
+
+      {draftCheck === "ready" && step === "straighten" && straightenSource ? (
+        <>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-2 px-3 py-2">
+            <div className="min-w-0">
+              <p className="truncate text-body-sm font-medium text-ink">
+                {fileName}
+              </p>
+              <p className="text-caption tabular-nums text-mute">
+                {formatBytes(fileSize)}
+                {originalSize
+                  ? `, ${originalSize.width.toLocaleString("en")} x ${originalSize.height.toLocaleString("en")} px`
+                  : ""}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              className="h-11 sm:h-10"
+              onClick={openPicker}
+              disabled={busy !== null}
+            >
+              Replace
+            </Button>
+          </div>
+          <StraightenPanel
+            key={pageVersion}
+            source={straightenSource}
+            busy={busy === "load"}
+            onApply={(bitmap, settings) =>
+              detectStraightenedPage(bitmap, settings)
+            }
+            onSkip={() => void skipStraightening()}
+          />
+        </>
+      ) : null}
 
       {draftCheck === "ready" && step === "review" ? (
         <>
@@ -2511,13 +2688,16 @@ function StepIndicator({
   step: Step;
   hasPage: boolean;
 }) {
-  const active = !hasPage
-    ? 1
-    : step === "submit"
-      ? 4
-      : step === "label"
-        ? 3
-        : 2;
+  const active =
+    step === "straighten"
+      ? 2
+      : !hasPage
+        ? 1
+        : step === "submit"
+          ? 5
+          : step === "label"
+            ? 4
+            : 3;
 
   const numberClass = (index: number) =>
     cn(
@@ -2551,7 +2731,7 @@ function StepIndicator({
           2
         </span>
         <span className={active === 2 ? "text-ink" : "text-mute"}>
-          Check lines
+          Straighten
         </span>
       </li>
       <li
@@ -2561,7 +2741,9 @@ function StepIndicator({
         <span aria-hidden="true" className={numberClass(3)}>
           3
         </span>
-        <span className={active === 3 ? "text-ink" : "text-mute"}>Label</span>
+        <span className={active === 3 ? "text-ink" : "text-mute"}>
+          Check lines
+        </span>
       </li>
       <li
         aria-current={active === 4 ? "step" : undefined}
@@ -2570,7 +2752,16 @@ function StepIndicator({
         <span aria-hidden="true" className={numberClass(4)}>
           4
         </span>
-        <span className={active === 4 ? "text-ink" : "text-mute"}>Submit</span>
+        <span className={active === 4 ? "text-ink" : "text-mute"}>Label</span>
+      </li>
+      <li
+        aria-current={active === 5 ? "step" : undefined}
+        className="flex items-center gap-2"
+      >
+        <span aria-hidden="true" className={numberClass(5)}>
+          5
+        </span>
+        <span className={active === 5 ? "text-ink" : "text-mute"}>Submit</span>
       </li>
     </ol>
   );
