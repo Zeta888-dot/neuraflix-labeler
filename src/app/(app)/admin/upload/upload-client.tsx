@@ -28,6 +28,7 @@ import {
 import type {
   ChunkPreview,
   ImportErrorRow,
+  ImportKind,
   ImportSource,
   ImportStatus,
   UploadStatus,
@@ -68,6 +69,19 @@ const reasonLabels: Record<string, string> = {
   input_too_long: "Input too long",
   invalid_source: "Source is not text",
   source_too_long: "Source too long",
+  missing_turns: "Missing turns",
+  invalid_turns: "Turns is not an array",
+  too_few_turns: "Fewer than 2 turns",
+  too_many_turns: "More than 20 turns",
+  invalid_turn: "A turn is not an object",
+  invalid_role: "Unknown role",
+  invalid_content: "Turn content is not text",
+  missing_content: "A turn is empty",
+  content_too_long: "A turn is over 4000 characters",
+  system_not_first: "System turn is not first",
+  multiple_system: "More than one system turn",
+  roles_not_alternating: "User and assistant do not alternate",
+  must_end_assistant: "Conversation does not end with assistant",
   row_too_large: "Row too large",
   duplicate_hash: "Duplicate of an earlier row",
   missing_raw: "Missing row data",
@@ -103,6 +117,7 @@ async function readPreview(
   const previewRows = await buildPreviewRows(
     rawChunk.rows,
     source.sourceLabel ?? preparedFile.originalName,
+    source.kind === "conversation" ? "conversation" : "instruction",
   );
 
   const contentHash = await sha256Hex(
@@ -412,6 +427,7 @@ export function UploadWorkspace({
 }) {
   const [status, setStatus] = useState<UploadStatus | null>(initialStatus);
   const [sources, setSources] = useState<ImportSource[]>(initialSources);
+  const [kind, setKind] = useState<ImportKind>("instruction");
   const [busy, setBusy] = useState<Busy>(null);
   const [busySourceId, setBusySourceId] = useState<string | null>(null);
   const [message, setMessage] = useState<Message | null>(null);
@@ -526,6 +542,7 @@ export function UploadWorkspace({
       setBusy("creating");
 
       const created = await createImportSourceAction({
+        kind,
         fileName: selected.name,
         fileSize: preparedFile.source.size,
         fileHash: hash,
@@ -543,6 +560,9 @@ export function UploadWorkspace({
 
       const nextSource = created.source;
       setSource(nextSource);
+      if (nextSource.kind === "instruction" || nextSource.kind === "conversation") {
+        setKind(nextSource.kind);
+      }
       setChunkRows(nextSource.chunkSize);
 
       if (nextSource.status === "completed") {
@@ -871,14 +891,43 @@ export function UploadWorkspace({
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <CardTitle>Instruction and response data</CardTitle>
+            <CardTitle>
+              {kind === "conversation"
+                ? "Conversation data"
+                : "Instruction and response data"}
+            </CardTitle>
             <p className="mt-1 max-w-[65ch] text-body-sm text-body">
               Load a JSON, JSON Lines or CSV file in chunks. Duplicate rows are
               skipped by english_hash. Invalid rows are logged and do not stop
               the chunk.
             </p>
           </div>
-          <Badge tone="accent">Instructions</Badge>
+          <Badge tone="accent">
+            {kind === "conversation" ? "Conversations" : "Instructions"}
+          </Badge>
+        </div>
+
+        <div
+          role="group"
+          aria-label="Dataset"
+          className="mt-4 flex flex-wrap gap-2"
+        >
+          {(["instruction", "conversation"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={kind === option}
+              onClick={() => setKind(option)}
+              disabled={source !== null || busy !== null}
+              className={
+                kind === option
+                  ? "inline-flex min-h-11 items-center rounded-full bg-solid px-4 text-body-sm font-medium text-on-solid disabled:opacity-60"
+                  : "inline-flex min-h-11 items-center rounded-full bg-surface-2 px-4 text-body-sm font-medium text-body hover:text-ink disabled:opacity-60"
+              }
+            >
+              {option === "conversation" ? "Conversations" : "Instructions"}
+            </button>
+          ))}
         </div>
 
         <div className="mt-5 grid gap-4 sm:grid-cols-3">
@@ -887,7 +936,11 @@ export function UploadWorkspace({
             <Input
               value={sourceLabel}
               onChange={(event) => setSourceLabel(event.target.value)}
-              placeholder="For example, english-instructions-v1"
+              placeholder={
+                kind === "conversation"
+                  ? "For example, english-conversations-v1"
+                  : "For example, english-instructions-v1"
+              }
               maxLength={120}
               disabled={source !== null || busy !== null}
             />

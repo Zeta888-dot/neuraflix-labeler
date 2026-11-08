@@ -23,7 +23,9 @@ import {
 import { decideQuota } from "@/lib/ocr/submit";
 import { TEXT_SUBMISSION_STATUSES } from "@/lib/plain-text";
 import { getPlainTextAdminStats } from "@/lib/plain-text-server";
+import { getRecentReviewedOcrPages } from "@/lib/review-server";
 import { AdminUsers } from "./admin-users";
+import { ReopenOcrCard } from "./reopen-ocr-card";
 
 export const metadata: Metadata = {
   title: "Admin",
@@ -90,6 +92,7 @@ async function AdminLoader() {
     ocrStats,
     ocrStorage,
     settings,
+    reviewedOcrPages,
   ] = await Promise.all([
     getAdminData(),
     getInstructionItemCounts(),
@@ -98,6 +101,7 @@ async function AdminLoader() {
     getOcrAdminStats(),
     getOcrStorageStatus(),
     getAdminSettings(),
+    getRecentReviewedOcrPages(10),
   ]);
 
   return (
@@ -211,8 +215,9 @@ async function AdminLoader() {
       <Card className="max-w-3xl">
         <CardTitle>Import English conversations</CardTitle>
         <p className="mt-1 text-body-sm text-body">
-          Run this in the project folder. It reads the service role key from
-          .env.local, and nothing in the web app can import conversations.
+          Upload conversations from the upload page in this browser. The local
+          command below still works for a file on this machine. It reads the
+          service role key from .env.local.
         </p>
 
         <div className="mt-4 flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2">
@@ -344,6 +349,8 @@ async function AdminLoader() {
       </Card>
 
       <OcrStorageCard storage={ocrStorage} />
+
+      <ReopenOcrCard pages={reviewedOcrPages} />
 
       <AdminSettingsCard settings={settings} />
 

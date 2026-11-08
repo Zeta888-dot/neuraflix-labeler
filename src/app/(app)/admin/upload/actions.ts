@@ -71,13 +71,13 @@ function actionError(error: { message?: string; code?: string | null }): string 
   if (message.includes("ADMIN_AUTH_REQUIRED")) return AUTH_MESSAGE;
   if (message.includes("ADMIN_FORBIDDEN")) return FORBIDDEN_MESSAGE;
   if (message.includes("IMPORT_KIND_UNSUPPORTED")) {
-    return "Only instruction imports are available in this phase.";
+    return "Only instruction and conversation imports are available.";
   }
   if (message.includes("IMPORT_PAUSE_DB")) {
     return "The database is at its pause threshold. Free space or raise the quota before loading more.";
   }
   if (message.includes("IMPORT_PAUSE_QUEUE")) {
-    return "Open instruction items are at the pause threshold. Finish or retire items before loading more.";
+    return "Open items are at the pause threshold. Finish or retire items before loading more.";
   }
   if (message.includes("IMPORT_PAUSED")) {
     return "This import is paused. Resume it before loading another chunk.";
@@ -118,6 +118,7 @@ function actionError(error: { message?: string; code?: string | null }): string 
 }
 
 const createSourceSchema = z.object({
+  kind: z.enum(["instruction", "conversation"]),
   fileName: z.string().trim().min(1).max(255),
   fileSize: z.number().int().min(1).max(209_715_200),
   fileHash: z.string().regex(HASH_PATTERN),
@@ -144,7 +145,7 @@ export async function createImportSourceAction(
 
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("admin_import_create_source", {
-    p_kind: "instruction",
+    p_kind: parsed.data.kind,
     p_file_name: parsed.data.fileName,
     p_file_size: parsed.data.fileSize,
     p_file_hash: parsed.data.fileHash,
@@ -240,8 +241,13 @@ export async function loadTextChunkAction(
     return { status: "error", message: genericMessage("UPLOAD_PARSE") };
   }
 
+  // A committed chunk can add open work for the contributor pages. Clear their
+  // route cache as well, so a fresh visit asks the claim RPC for the new rows.
   revalidatePath("/admin/upload");
   revalidatePath("/admin");
+  revalidatePath("/dashboard");
+  revalidatePath("/instructions");
+  revalidatePath("/conversations");
   return { status: "ok", result };
 }
 

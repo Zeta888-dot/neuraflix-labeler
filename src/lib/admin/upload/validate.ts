@@ -1,24 +1,38 @@
 /**
- * Instruction row validation for the browser import. The database validates
- * every row again with the same rules, so a changed client cannot skip them.
+ * Instruction and conversation row validation for the browser import. The
+ * database validates every row again with the same rules, so a changed client
+ * cannot skip them.
  */
 
-import { englishHashSource } from "../../khowar";
+import {
+  MAX_TURN_CHARS,
+  conversationHashSource,
+  englishHashSource,
+  isConversationRole,
+  type ConversationTurn,
+} from "../../khowar";
 import { sha256Hex } from "./hash";
-import type { ImportErrorRow, ParsedRow, RawRow } from "./types";
+import type { ImportErrorRow, ImportKind, ParsedRow, RawRow } from "./types";
 
 export type RowValidation =
   | {
       ok: true;
-      row: {
-        instruction: string;
-        response: string;
-        input: string | null;
-        source: string | null;
-      };
+      row: InstructionRowPayload | ConversationRowPayload;
       hashSource: string;
     }
   | { ok: false; reason: string; detail: string | null };
+
+type InstructionRowPayload = {
+  instruction: string;
+  response: string;
+  input: string | null;
+  source: string | null;
+};
+
+type ConversationRowPayload = {
+  turns: ConversationTurn[];
+  source: string | null;
+};
 
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== ""
@@ -96,6 +110,99 @@ export function validateInstructionRow(
   };
 }
 
+/** Validates one parsed conversation object. Mirrors scripts/import-conversations.ts. */
+export function validateConversationRow(
+  value: unknown,
+  fileSource: string | null,
+): RowValidation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, reason: "not_an_object", detail: null };
+  }
+
+  const record = value as Record<string, unknown>;
+  const rawTurns = record.turns ?? record.messages;
+
+  if (rawTurns === undefined || rawTurns === null) {
+    return { ok: false, reason: "missing_turns", detail: null };
+  }
+  if (!Array.isArray(rawTurns)) {
+    return { ok: false, reason: "invalid_turns", detail: null };
+  }
+  if (rawTurns.length < 2) {
+    return { ok: false, reason: "too_few_turns", detail: null };
+  }
+  if (rawTurns.length > 20) {
+    return { ok: false, reason: "too_many_turns", detail: null };
+  }
+
+  if (
+    record.source !== undefined &&
+    record.source !== null &&
+    typeof record.source !== "string"
+  ) {
+    return { ok: false, reason: "invalid_source", detail: null };
+  }
+
+  const turns: ConversationTurn[] = [];
+  for (let index = 0; index < rawTurns.length; index += 1) {
+    const entry = rawTurns[index];
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return { ok: false, reason: "invalid_turn", detail: null };
+    }
+
+    const turn = entry as Record<string, unknown>;
+    if (!isConversationRole(turn.role)) {
+      return { ok: false, reason: "invalid_role", detail: null };
+    }
+    if (turn.content !== undefined && typeof turn.content !== "string") {
+      return { ok: false, reason: "invalid_content", detail: null };
+    }
+
+    const content = text(turn.content);
+    if (!content) {
+      return { ok: false, reason: "missing_content", detail: null };
+    }
+    if (content.length > MAX_TURN_CHARS) {
+      return { ok: false, reason: "content_too_long", detail: null };
+    }
+
+    turns.push({ role: turn.role, content });
+  }
+
+  const systemCount = turns.filter((turn) => turn.role === "system").length;
+  if (systemCount > 1) {
+    return { ok: false, reason: "multiple_system", detail: null };
+  }
+  if (systemCount === 1 && turns[0].role !== "system") {
+    return { ok: false, reason: "system_not_first", detail: null };
+  }
+
+  const body = systemCount === 1 ? turns.slice(1) : turns;
+  if (body.length < 2) {
+    return { ok: false, reason: "too_few_turns", detail: null };
+  }
+  for (let index = 0; index < body.length; index += 1) {
+    const expected = index % 2 === 0 ? "user" : "assistant";
+    if (body[index].role !== expected) {
+      return { ok: false, reason: "roles_not_alternating", detail: null };
+    }
+  }
+  if (body.length % 2 !== 0) {
+    return { ok: false, reason: "must_end_assistant", detail: null };
+  }
+
+  const rowSource = text(record.source);
+  if (rowSource && rowSource.length > 120) {
+    return { ok: false, reason: "source_too_long", detail: null };
+  }
+
+  return {
+    ok: true,
+    row: { turns, source: rowSource ?? fileSource },
+    hashSource: conversationHashSource(turns),
+  };
+}
+
 /** Parses one JSONL or converted CSV row and validates it. */
 export function parseInstructionRaw(
   raw: string,
@@ -121,6 +228,44 @@ export function parseInstructionRaw(
   }
 
   return validateInstructionRow(parsed, fileSource);
+}
+
+/** Parses one conversation JSONL row and validates it. */
+export function parseConversationRaw(
+  raw: string,
+  fileSource: string | null,
+): RowValidation {
+  if (raw.trim() === "") {
+    return { ok: false, reason: "empty_row", detail: null };
+  }
+
+  if (new TextEncoder().encode(raw).length > 524_288) {
+    return { ok: false, reason: "row_too_large", detail: null };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {
+      ok: false,
+      reason: "invalid_json",
+      detail: raw.slice(0, 300),
+    };
+  }
+
+  return validateConversationRow(parsed, fileSource);
+}
+
+/** Parses one row for the selected import kind. */
+export function parseImportRaw(
+  raw: string,
+  fileSource: string | null,
+  kind: ImportKind,
+): RowValidation {
+  return kind === "conversation"
+    ? parseConversationRaw(raw, fileSource)
+    : parseInstructionRaw(raw, fileSource);
 }
 
 /** Counts hashes that repeat inside one chunk. */
@@ -154,6 +299,7 @@ export type PreviewRows = {
 export async function buildPreviewRows(
   rows: readonly RawRow[],
   fileSource: string | null,
+  kind: ImportKind = "instruction",
 ): Promise<PreviewRows> {
   const parsed: ParsedRow[] = [];
   const seen = new Set<string>();
@@ -163,7 +309,7 @@ export async function buildPreviewRows(
   let duplicateCount = 0;
 
   for (const row of rows) {
-    const result = parseInstructionRaw(row.raw, fileSource);
+    const result = parseImportRaw(row.raw, fileSource, kind);
 
     if (!result.ok) {
       invalidCount += 1;

@@ -6,6 +6,12 @@ import { Card, CardTitle } from "@/components/ui/card";
 import { formatBytes } from "@/lib/admin/upload/status";
 import type { ImportSource, ImportStatus } from "@/lib/admin/upload/types";
 
+function kindLabel(kind: string): string {
+  if (kind === "conversation") return "Conversations";
+  if (kind === "ocr_page") return "OCR pages";
+  return "Instructions";
+}
+
 const statusLabels: Record<ImportStatus, string> = {
   active: "Active",
   paused: "Paused",
@@ -53,8 +59,8 @@ export function SourceList({
 
       {sources.length === 0 ? (
         <p className="mt-5 rounded-md bg-surface-2/60 px-4 py-3 text-body-sm text-body">
-          No uploads yet. Choose an instruction file above to start the first
-          import.
+          No uploads yet. Choose an instruction or conversation file above to
+          start the first import.
         </p>
       ) : (
         <ul className="mt-5 space-y-3">
@@ -86,7 +92,7 @@ export function SourceList({
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge tone="neutral">Instructions</Badge>
+                    <Badge tone="neutral">{kindLabel(source.kind)}</Badge>
                     <Badge tone={statusTone(source.status)}>
                       {statusLabels[source.status]}
                     </Badge>

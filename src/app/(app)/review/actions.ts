@@ -263,7 +263,7 @@ async function blockedFromError(
   if (message.includes("REVIEW_NOTE_REQUIRED")) {
     return {
       status: "blocked",
-      message: "Add a note of at least 3 characters before rejecting.",
+      message: "Choose a reason before rejecting.",
     };
   }
   if (message.includes("REVIEW_INVALID_NOTE")) {
@@ -320,3 +320,71 @@ async function blockedFromError(
 
 /** Re-exported for the client components so the union stays one source. */
 export type { ReviewDecisionInput };
+
+export type ReopenOcrResult =
+  | { status: "reopened" }
+  | { status: "error"; message: string };
+
+/**
+ * Admin undo for an approved or rejected OCR page. The page and its lines go
+ * back to submitted, reviewer fields are cleared, and review_log records the
+ * reopen. Queue counts refresh on the next read.
+ */
+export async function reopenOcrPage(
+  pageId: unknown,
+  note?: unknown,
+): Promise<ReopenOcrResult> {
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+
+  const profile = await getProfile(user.id);
+  if (!profile || profile.role !== "admin") {
+    return { status: "error", message: FORBIDDEN_MESSAGE };
+  }
+
+  const parsed = z
+    .object({
+      pageId: z.uuid(),
+      note: z.string().trim().max(2000).optional(),
+    })
+    .safeParse({ pageId, note: note ?? undefined });
+
+  if (!parsed.success) {
+    return { status: "error", message: "That page could not be read." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("admin_reopen_ocr_page", {
+    p_page_id: parsed.data.pageId,
+    p_note: parsed.data.note && parsed.data.note !== "" ? parsed.data.note : null,
+  });
+
+  if (error) {
+    logRpcError("[admin_reopen_ocr_page]", error);
+    const message = error.message ?? "";
+    if (message.includes("REVIEW_NOT_FOUND")) {
+      return { status: "error", message: "That page no longer exists." };
+    }
+    if (message.includes("REVIEW_ALREADY_SUBMITTED")) {
+      return {
+        status: "error",
+        message: "That page is already back in the review queue.",
+      };
+    }
+    if (message.includes("REVIEW_FORBIDDEN")) {
+      return { status: "error", message: FORBIDDEN_MESSAGE };
+    }
+    if (message.includes("REVIEW_INVALID_NOTE")) {
+      return { status: "error", message: "Keep the note under 2000 characters." };
+    }
+    return {
+      status: "error",
+      message: "The page could not be reopened. Try again.",
+    };
+  }
+
+  revalidatePath("/review");
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+  return { status: "reopened" };
+}

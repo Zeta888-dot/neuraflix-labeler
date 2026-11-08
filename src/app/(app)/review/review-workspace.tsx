@@ -129,7 +129,6 @@ export function ReviewWorkspace({
   );
 
   const [rejectOpen, setRejectOpen] = useState(false);
-  const [rejectNote, setRejectNote] = useState("");
   const [rejectError, setRejectError] = useState<string | null>(null);
 
   const item = queue.status === "ok" ? queue.item : null;
@@ -470,17 +469,16 @@ export function ReviewWorkspace({
 
   function openReject() {
     if (busy || !item) return;
-    setRejectNote("");
     setRejectError(null);
     setRejectOpen(true);
   }
 
-  async function handleReject() {
+  async function handleReject(noteText: string) {
     if (busy || !item || !draft) return;
 
-    const note = rejectNote.trim();
-    if (note.length < 3) {
-      setRejectError("Add a note of at least 3 characters before rejecting.");
+    const note = noteText.trim();
+    if (note.length < 5) {
+      setRejectError("Choose a reason before rejecting.");
       return;
     }
 
@@ -506,7 +504,6 @@ export function ReviewWorkspace({
     }
 
     setRejectOpen(false);
-    setRejectNote("");
     applyQueue(result.queue);
     setMessage(result.message);
   }
@@ -759,17 +756,17 @@ export function ReviewWorkspace({
       <RejectDialog
         open={rejectOpen}
         pending={pending}
-        note={rejectNote}
         error={rejectError}
         itemLabel={item?.kind === "ocr" ? "page" : "item"}
-        onNoteChange={(note) => {
-          setRejectNote(note);
-          setRejectError(null);
-        }}
+        detail={
+          item?.kind === "ocr"
+            ? `This page has ${item.lineCount} ${item.lineCount === 1 ? "line" : "lines"}. Rejecting marks every line rejected and removes the page from the queue.`
+            : "The submitted translation will be rejected and the reason is sent to the contributor."
+        }
         onClose={() => {
           if (!pending) setRejectOpen(false);
         }}
-        onSubmit={() => void handleReject()}
+        onSubmit={(note) => void handleReject(note)}
       />
     </div>
   );

@@ -1,0 +1,13 @@
+{"turns":[{"role":"user","content":"How do I greet a guest in the morning?"},{"role":"assistant","content":"Say good morning and ask how they are."}]}
+{"turns":[{"role":"system","content":"You are a careful Khowar teacher."},{"role":"user","content":"What is the Khowar word for water?"},{"role":"assistant","content":"The Khowar word for water is ghroom."}]}
+{"messages":[{"role":"user","content":"Name a colour in the sky."},{"role":"assistant","content":"Blue is a colour in the sky."}]}
+{"turns":[{"role":"user","content":"How do I greet a guest in the morning?"},{"role":"assistant","content":"Say good morning and ask how they are."}],"source":"duplicate-of-row-one"}
+{"turns":[{"role":"user","content":"Only one turn."}]}
+{"turns":[{"role":"user","content":"First turn."},{"role":"assistant","content":"Second turn."},{"role":"user","content":"An extra user turn."}]}
+{"turns":[{"role":"assistant","content":"An assistant cannot start a conversation."},{"role":"user","content":"Correct."}]}
+{"turns":[{"role":"system","content":"First system turn."},{"role":"user","content":"A question."},{"role":"system","content":"A second system turn."},{"role":"assistant","content":"An answer."}]}
+{"turns":[{"role":"user","content":"A question."},{"role":"system","content":"A system turn in the middle."},{"role":"assistant","content":"An answer."}]}
+{"turns":[{"role":"user","content":"A question."},{"role":"assistant","content":"   "}]}
+{"turns":[{"role":"customer","content":"A question."},{"role":"assistant","content":"An answer."}]}
+not json at all
+{"turns":[{"role":"user","content":"A question."},{"role":"assistant","content":"An answer."}],"source":42}

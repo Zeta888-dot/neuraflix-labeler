@@ -51,7 +51,8 @@ export async function getImportSources(
     .map(parseImportSource)
     .filter(
       (source): source is ImportSource =>
-        source !== null && source.kind === "instruction",
+        source !== null &&
+        (source.kind === "instruction" || source.kind === "conversation"),
     );
 }
 

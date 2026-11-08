@@ -69,6 +69,52 @@ export async function getReviewsDone(userId: string): Promise<number | null> {
   return count;
 }
 
+export type ReviewedOcrPage = {
+  id: string;
+  label: string | null;
+  status: "approved" | "rejected";
+  lineCount: number;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+};
+
+/** The latest approved or rejected OCR pages, for the admin reopen card. */
+export async function getRecentReviewedOcrPages(
+  limit = 10,
+): Promise<ReviewedOcrPage[] | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("ocr_pages")
+    .select("id, label, status, line_count, reviewed_at, review_note")
+    .in("status", ["approved", "rejected"])
+    .order("reviewed_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    logRpcError("[reviewed_ocr_pages]", error);
+    return null;
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  const pages: ReviewedOcrPage[] = [];
+  for (const entry of rows) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    if (typeof row.id !== "string") continue;
+    if (row.status !== "approved" && row.status !== "rejected") continue;
+    pages.push({
+      id: row.id,
+      label: typeof row.label === "string" ? row.label : null,
+      status: row.status,
+      lineCount:
+        typeof row.line_count === "number" ? Math.trunc(row.line_count) : 0,
+      reviewedAt: typeof row.reviewed_at === "string" ? row.reviewed_at : null,
+      reviewNote: typeof row.review_note === "string" ? row.review_note : null,
+    });
+  }
+  return pages;
+}
+
 type SignedLineRow = {
   id: string;
   idx: number;

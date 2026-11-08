@@ -5,7 +5,7 @@
 
 export type UploadFormat = "json" | "jsonl" | "csv";
 
-export type ImportKind = "instruction";
+export type ImportKind = "instruction" | "conversation";
 
 export type ImportStatus =
   | "active"
@@ -128,5 +128,10 @@ export type InstructionRow = {
   instruction: string;
   response: string;
   input: string | null;
+  source: string | null;
+};
+
+export type ConversationRow = {
+  turns: Array<{ role: "system" | "user" | "assistant"; content: string }>;
   source: string | null;
 };

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   buildAutoChecks,
+  buildRejectNote,
   conversationTurnsChanged,
   emptyReviewCounts,
   instructionValuesChanged,
@@ -171,7 +172,7 @@ test("review dates are English and UTC", () => {
   assert.equal(reviewDateLabel("not a date"), "");
 });
 
-test("a rejection always needs a note of at least 3 characters", () => {
+test("a rejection always needs a note of at least 5 characters", () => {
   const empty = reviewDecisionSchema.safeParse({
     decision: "reject",
     note: "",
@@ -186,12 +187,23 @@ test("a rejection always needs a note of at least 3 characters", () => {
 
   assert.equal(
     reviewDecisionSchema.safeParse({ decision: "reject", note: "Fix" }).success,
+    false,
+  );
+  assert.equal(
+    reviewDecisionSchema.safeParse({ decision: "reject", note: "Fix it" }).success,
     true,
   );
   assert.equal(
     reviewDecisionSchema.safeParse({ decision: "approve", note: "" }).success,
     true,
   );
+});
+
+test("reject reasons build the note that reaches the database", () => {
+  assert.equal(buildRejectNote("not_khowar", ""), "Not Khowar");
+  assert.equal(buildRejectNote("unreadable", "ignored"), "Unreadable");
+  assert.equal(buildRejectNote("rights", ""), "Rights or copyright");
+  assert.equal(buildRejectNote("other", "  blurred scan "), "Other: blurred scan");
 });
 
 test("instruction decisions validate values on approve only", () => {

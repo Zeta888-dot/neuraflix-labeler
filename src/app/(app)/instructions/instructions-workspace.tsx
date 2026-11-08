@@ -315,6 +315,16 @@ export function InstructionsWorkspace({
             >
               Back to the dashboard
             </Link>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="mt-4 ml-2"
+              onClick={() => void load()}
+              disabled={busy !== null}
+            >
+              <ArrowClockwise size={14} weight="light" aria-hidden="true" />
+              Check again
+            </Button>
           </EmptyState>
         </div>
       ) : claim.status === "error" ? (

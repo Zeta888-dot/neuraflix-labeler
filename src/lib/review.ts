@@ -379,16 +379,39 @@ const noteField = z
   .string()
   .max(2000, "Keep the note under 2000 characters.");
 
+/** Preset reject reasons. The note stores the label, never a hidden id. */
+export const rejectReasons = [
+  { id: "not_khowar", label: "Not Khowar" },
+  { id: "unreadable", label: "Unreadable" },
+  { id: "rights", label: "Rights or copyright" },
+  { id: "other", label: "Other" },
+] as const;
+
+export type RejectReasonId = (typeof rejectReasons)[number]["id"];
+
+export const rejectReasonLabels: Record<RejectReasonId, string> = {
+  not_khowar: "Not Khowar",
+  unreadable: "Unreadable",
+  rights: "Rights or copyright",
+  other: "Other",
+};
+
+/** The exact text stored in review_log.note for one reject choice. */
+export function buildRejectNote(reason: RejectReasonId, custom: string): string {
+  if (reason === "other") return `Other: ${custom.trim()}`;
+  return rejectReasonLabels[reason];
+}
+
 function addDecisionIssues(
   decision: ReviewDecision,
   note: string,
   ctx: z.RefinementCtx,
 ): void {
-  if (decision === "reject" && note.trim().length < 3) {
+  if (decision === "reject" && note.trim().length < 5) {
     ctx.addIssue({
       code: "custom",
       path: ["note"],
-      message: "Add a note of at least 3 characters before rejecting.",
+      message: "Choose a reason before rejecting.",
     });
   }
 }

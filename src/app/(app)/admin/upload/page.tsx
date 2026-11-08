@@ -21,7 +21,7 @@ export default function AdminUploadPage() {
     <>
       <PageHeader
         title="Upload data"
-        description="Admin only. Load instruction and response data in chunks, resume by selecting the same file, and review row errors."
+        description="Admin only. Load instructions or conversations in chunks, resume by selecting the same file, and review row errors."
       />
       <Suspense fallback={<UploadSkeleton />}>
         <UploadLoader />

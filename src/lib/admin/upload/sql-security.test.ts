@@ -133,3 +133,125 @@ test("chunk commits are idempotent and row provenance is unique", () => {
     "conversation items need unique provenance",
   );
 });
+
+test("imported rows land as claimable open items", () => {
+  // The contributor queue reads instruction_items.status = 'open'. The import
+  // insert must set that status, and claim_next must not filter on provenance,
+  // or an imported row would never be served.
+  assert.match(
+    migration,
+    /insert into public\.instruction_items[\s\S]*?values \([\s\S]*?'open'[\s\S]*?import_source_id[\s\S]*?source_row_index/i,
+    "the instruction chunk insert must write status open and provenance",
+  );
+
+  const claimMigration = readFileSync(
+    resolve(process.cwd(), "supabase/migrations/0003_fix_ambiguous_columns.sql"),
+    "utf8",
+  );
+  const instructionPick = claimMigration.match(
+    /-- 3\. Oldest open item[\s\S]*?limit 1;/i,
+  );
+  assert.ok(instructionPick, "the instruction claim pick is missing");
+  assert.doesNotMatch(
+    instructionPick[0],
+    /import_source_id|source_row_index/i,
+    "claim_next must not filter imported items by provenance",
+  );
+  assert.match(
+    instructionPick[0],
+    /i\.status = 'open'/i,
+    "claim_next must keep selecting open items",
+  );
+});
+
+test("the conversation import keeps the same RPC guarantees", () => {
+  const conversationMigration = readFileSync(
+    resolve(process.cwd(), "supabase/migrations/0012_import_conversations.sql"),
+    "utf8",
+  );
+
+  for (const name of [
+    "admin_import_create_source",
+    "admin_import_text_chunk",
+  ]) {
+    const pattern = new RegExp(
+      `create or replace function public\\.${name}\\s*\\([\\s\\S]*?\\n\\$\\$;`,
+      "i",
+    );
+    const match = conversationMigration.match(pattern);
+
+    assert.ok(match, `${name} is missing from the conversation migration`);
+    assert.match(match[0], /security definer/i);
+    assert.match(match[0], /set search_path = public/i);
+    assert.match(match[0], /public\.is_admin\(\)/i);
+  }
+
+  assert.match(
+    conversationMigration,
+    /p_kind not in \('instruction', 'conversation'\)/i,
+    "create_source must accept the conversation kind only",
+  );
+  assert.match(
+    conversationMigration,
+    /v_source\.kind not in \('instruction', 'conversation'\)/i,
+    "text_chunk must accept the conversation kind only",
+  );
+  assert.match(
+    conversationMigration,
+    /insert into public\.conversation_items[\s\S]*?values \([\s\S]*?'open'[\s\S]*?import_source_id[\s\S]*?source_row_index/i,
+    "the conversation chunk insert must write status open and provenance",
+  );
+  assert.match(
+    conversationMigration,
+    /v_state\.open_conversations >= v_state\.pause_conversations/i,
+    "the conversation queue must use its own pause threshold",
+  );
+
+  for (const signature of [
+    "import_conversation_hash(jsonb)",
+    "import_parse_conversation(text, text)",
+  ]) {
+    assert.ok(
+      conversationMigration.includes(
+        `revoke all on function public.${signature} from public, anon, authenticated;`,
+      ),
+      `${signature} must be closed to app users`,
+    );
+  }
+
+  assert.match(
+    conversationMigration,
+    /v_role not in \('system', 'user', 'assistant'\)/i,
+    "the parser must reject unknown roles",
+  );
+  assert.match(
+    conversationMigration,
+    /'roles_not_alternating'/i,
+    "the parser must enforce alternating turns",
+  );
+  assert.match(
+    conversationMigration,
+    /'must_end_assistant'/i,
+    "the parser must require a closing assistant turn",
+  );
+
+  const claimMigration = readFileSync(
+    resolve(process.cwd(), "supabase/migrations/0003_fix_ambiguous_columns.sql"),
+    "utf8",
+  );
+  const conversationBlock = claimMigration.match(
+    /-- Conversation items mirror the instruction logic[\s\S]*?limit 1;/i,
+  );
+  assert.ok(conversationBlock, "the conversation claim pick is missing");
+  assert.doesNotMatch(
+    conversationBlock[0],
+    /import_source_id|source_row_index/i,
+    "claim_next must not filter imported conversations by provenance",
+  );
+  assert.match(
+    conversationBlock[0],
+    /i\.status = 'open'/i,
+    "claim_next must keep selecting open conversations",
+  );
+});
+

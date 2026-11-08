@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { englishHashSource } from "../../khowar";
+import { conversationHashSource, englishHashSource } from "../../khowar";
 import { sha256Hex } from "./hash";
 import type { RawRow } from "./types";
 import {
   buildPreviewRows,
   countDuplicateHashes,
+  parseConversationRaw,
   parseInstructionRaw,
+  validateConversationRow,
   validateInstructionRow,
 } from "./validate";
 
@@ -191,4 +193,161 @@ test("buildPreviewRows marks in-chunk duplicates and invalid rows", async () => 
   assert.equal(preview.rows[1].reason, "duplicate_hash");
   assert.equal(preview.rows[2].valid, false);
   assert.equal(preview.rows[2].reason, "empty_instruction");
+});
+
+test("validateConversationRow trims turns and accepts the messages alias", () => {
+  const turns = [
+    { role: "system", content: "  Be brief.  " },
+    { role: "user", content: "  What is the Khowar word for water?  " },
+    { role: "assistant", content: "  ghroom  " },
+  ];
+
+  const result = validateConversationRow({ turns }, "file.jsonl");
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.deepEqual(result.row, {
+    turns: [
+      { role: "system", content: "Be brief." },
+      { role: "user", content: "What is the Khowar word for water?" },
+      { role: "assistant", content: "ghroom" },
+    ],
+    source: "file.jsonl",
+  });
+  assert.equal(
+    result.hashSource,
+    conversationHashSource([
+      { role: "system", content: "Be brief." },
+      { role: "user", content: "What is the Khowar word for water?" },
+      { role: "assistant", content: "ghroom" },
+    ]),
+  );
+
+  const alias = validateConversationRow(
+    {
+      messages: [
+        { role: "user", content: "A question." },
+        { role: "assistant", content: "An answer." },
+      ],
+      source: "  row-source  ",
+    },
+    "file.jsonl",
+  );
+  assert.equal(alias.ok, true);
+  if (alias.ok) assert.equal(alias.row.source, "row-source");
+});
+
+test("validateConversationRow reports structural problems", () => {
+  const turn = { role: "user", content: "A question." };
+  const reply = { role: "assistant", content: "An answer." };
+  const many = Array.from({ length: 21 }, () => ({ ...turn }));
+
+  const cases: Array<[unknown, string]> = [
+    [null, "not_an_object"],
+    [[], "not_an_object"],
+    [{}, "missing_turns"],
+    [{ turns: "nope" }, "invalid_turns"],
+    [{ turns: [] }, "too_few_turns"],
+    [{ turns: many }, "too_many_turns"],
+    [{ turns: [1, 2] }, "invalid_turn"],
+    [{ turns: [turn, { role: "customer", content: "x" }] }, "invalid_role"],
+    [{ turns: [turn, { role: "assistant", content: 1 }] }, "invalid_content"],
+    [{ turns: [turn, { role: "assistant", content: "   " }] }, "missing_content"],
+    [
+      { turns: [turn, { ...reply, content: "x".repeat(4001) }] },
+      "content_too_long",
+    ],
+    [
+      {
+        turns: [
+          { role: "system", content: "one" },
+          turn,
+          { role: "system", content: "two" },
+          reply,
+        ],
+      },
+      "multiple_system",
+    ],
+    [
+      { turns: [turn, { role: "system", content: "middle" }, reply] },
+      "system_not_first",
+    ],
+    [{ turns: [reply, turn] }, "roles_not_alternating"],
+    [{ turns: [turn, reply, turn] }, "must_end_assistant"],
+    [
+      {
+        turns: [
+          { role: "system", content: "only system and user" },
+          turn,
+        ],
+      },
+      "too_few_turns",
+    ],
+    [{ turns: [turn, reply], source: 1 }, "invalid_source"],
+    [
+      { turns: [turn, reply], source: "x".repeat(121) },
+      "source_too_long",
+    ],
+  ];
+
+  for (const [value, reason] of cases) {
+    const result = validateConversationRow(value, null);
+    assert.equal(result.ok, false, `expected ${reason}`);
+    if (!result.ok) assert.equal(result.reason, reason);
+  }
+});
+
+test("parseConversationRaw reports empty and invalid JSON rows", () => {
+  const empty = parseConversationRaw("   ", null);
+  assert.equal(empty.ok, false);
+  if (!empty.ok) assert.equal(empty.reason, "empty_row");
+
+  const invalid = parseConversationRaw("not json", null);
+  assert.equal(invalid.ok, false);
+  if (!invalid.ok) {
+    assert.equal(invalid.reason, "invalid_json");
+    assert.equal(invalid.detail, "not json");
+  }
+
+  const array = parseConversationRaw("[]", null);
+  assert.equal(array.ok, false);
+  if (!array.ok) assert.equal(array.reason, "not_an_object");
+});
+
+test("buildPreviewRows validates conversations and marks hash duplicates", async () => {
+  const rows: RawRow[] = [
+    {
+      raw: '{"turns":[{"role":"user","content":"Hi"},{"role":"assistant","content":"Hello"}]}',
+      rowIndex: 1,
+      byteLength: 80,
+    },
+    {
+      raw: '{"turns":[{"role":"user","content":"  Hi  "},{"role":"assistant","content":"Hello"}],"source":"again"}',
+      rowIndex: 2,
+      byteLength: 110,
+    },
+    {
+      raw: '{"turns":[{"role":"user","content":"Hi"}]}',
+      rowIndex: 3,
+      byteLength: 40,
+    },
+  ];
+
+  const preview = await buildPreviewRows(rows, "conversations.jsonl", "conversation");
+
+  assert.equal(preview.validCount, 1);
+  assert.equal(preview.duplicateCount, 1);
+  assert.equal(preview.invalidCount, 1);
+  assert.equal(preview.errors.length, 1);
+  assert.equal(preview.errors[0].reason, "too_few_turns");
+  assert.equal(preview.rows[1].reason, "duplicate_hash");
+  assert.equal(
+    preview.rows[0].hash,
+    await sha256Hex(
+      conversationHashSource([
+        { role: "user", content: "Hi" },
+        { role: "assistant", content: "Hello" },
+      ]),
+    ),
+  );
 });
