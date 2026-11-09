@@ -14,13 +14,23 @@ import {
 import { sha256Hex } from "./hash";
 import type { ImportErrorRow, ImportKind, ParsedRow, RawRow } from "./types";
 
-export type RowValidation =
+export type InstructionRowValidation =
   | {
       ok: true;
-      row: InstructionRowPayload | ConversationRowPayload;
+      row: InstructionRowPayload;
       hashSource: string;
     }
   | { ok: false; reason: string; detail: string | null };
+
+export type ConversationRowValidation =
+  | {
+      ok: true;
+      row: ConversationRowPayload;
+      hashSource: string;
+    }
+  | { ok: false; reason: string; detail: string | null };
+
+export type RowValidation = InstructionRowValidation | ConversationRowValidation;
 
 type InstructionRowPayload = {
   instruction: string;
@@ -44,7 +54,7 @@ function text(value: unknown): string | null {
 export function validateInstructionRow(
   value: unknown,
   fileSource: string | null,
-): RowValidation {
+): InstructionRowValidation {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { ok: false, reason: "not_an_object", detail: null };
   }
@@ -114,7 +124,7 @@ export function validateInstructionRow(
 export function validateConversationRow(
   value: unknown,
   fileSource: string | null,
-): RowValidation {
+): ConversationRowValidation {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { ok: false, reason: "not_an_object", detail: null };
   }
@@ -207,7 +217,7 @@ export function validateConversationRow(
 export function parseInstructionRaw(
   raw: string,
   fileSource: string | null,
-): RowValidation {
+): InstructionRowValidation {
   if (raw.trim() === "") {
     return { ok: false, reason: "empty_row", detail: null };
   }
@@ -234,7 +244,7 @@ export function parseInstructionRaw(
 export function parseConversationRaw(
   raw: string,
   fileSource: string | null,
-): RowValidation {
+): ConversationRowValidation {
   if (raw.trim() === "") {
     return { ok: false, reason: "empty_row", detail: null };
   }

@@ -138,10 +138,15 @@ test("imported rows land as claimable open items", () => {
   // The contributor queue reads instruction_items.status = 'open'. The import
   // insert must set that status, and claim_next must not filter on provenance,
   // or an imported row would never be served.
+  const insert = migration.match(
+    /insert into public\.instruction_items[\s\S]*?returning id into v_item_id;/i,
+  );
+  assert.ok(insert, "the instruction chunk insert is missing");
+  assert.match(insert[0], /'open'/, "the insert must write status open");
   assert.match(
-    migration,
-    /insert into public\.instruction_items[\s\S]*?values \([\s\S]*?'open'[\s\S]*?import_source_id[\s\S]*?source_row_index/i,
-    "the instruction chunk insert must write status open and provenance",
+    insert[0],
+    /import_source_id[\s\S]*?source_row_index/i,
+    "the insert must write provenance",
   );
 
   const claimMigration = readFileSync(
@@ -196,10 +201,19 @@ test("the conversation import keeps the same RPC guarantees", () => {
     /v_source\.kind not in \('instruction', 'conversation'\)/i,
     "text_chunk must accept the conversation kind only",
   );
+  const conversationInsert = conversationMigration.match(
+    /insert into public\.conversation_items[\s\S]*?returning id into v_item_id;/i,
+  );
+  assert.ok(conversationInsert, "the conversation chunk insert is missing");
   assert.match(
-    conversationMigration,
-    /insert into public\.conversation_items[\s\S]*?values \([\s\S]*?'open'[\s\S]*?import_source_id[\s\S]*?source_row_index/i,
-    "the conversation chunk insert must write status open and provenance",
+    conversationInsert[0],
+    /'open'/,
+    "the conversation insert must write status open",
+  );
+  assert.match(
+    conversationInsert[0],
+    /import_source_id[\s\S]*?source_row_index/i,
+    "the conversation insert must write provenance",
   );
   assert.match(
     conversationMigration,

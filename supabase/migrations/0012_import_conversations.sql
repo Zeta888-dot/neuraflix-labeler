@@ -198,8 +198,8 @@ begin
 
   select count(*)::integer
     into v_system_count
-  from jsonb_array_elements(v_clean) t
-  where t ->> 'role' = 'system';
+  from jsonb_array_elements(v_clean) as t(turn)
+  where t.turn ->> 'role' = 'system';
 
   if v_system_count > 1 then
     return query select false, 'multiple_system'::text, null::text, null::jsonb, null::text, null::text;
