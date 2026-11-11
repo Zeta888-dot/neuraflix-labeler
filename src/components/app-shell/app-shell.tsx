@@ -9,7 +9,7 @@ import {
   X,
   type Icon,
 } from "@phosphor-icons/react";
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import {
   useEffect,
@@ -22,6 +22,7 @@ import {
 } from "react";
 import { LabelerWordmark } from "@/components/brand/Wordmark";
 import { ThemeMenuItem } from "@/components/app-shell/theme-toggle";
+import { NavigationProgress } from "@/components/app-shell/navigation-progress";
 import {
   isActivePath,
   visibleNavItems,
@@ -83,6 +84,8 @@ export function AppShell({
 
   return (
     <div className="min-h-dvh">
+      <NavigationProgress />
+
       <a
         href="#main"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-full focus:bg-solid focus:px-4 focus:py-2 focus:text-body-sm focus:text-on-solid"
@@ -245,6 +248,7 @@ function SidebarContent({
                   <span className={cn(collapsed && "sr-only")}>
                     {item.label}
                   </span>
+                  <NavPending />
                 </Link>
               </li>
             );
@@ -254,6 +258,23 @@ function SidebarContent({
 
       <UserMenu user={user} collapsed={collapsed} />
     </>
+  );
+}
+
+/**
+ * Inline pending hint for the sidebar link that was clicked. Fixed size and
+ * absolutely placed so it never shifts the label.
+ */
+function NavPending() {
+  const { pending } = useLinkStatus();
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "absolute right-2 top-1/2 size-1.5 -translate-y-1/2 rounded-full bg-accent transition-opacity",
+        pending ? "opacity-100 animate-pulse motion-reduce:animate-none" : "opacity-0",
+      )}
+    />
   );
 }
 

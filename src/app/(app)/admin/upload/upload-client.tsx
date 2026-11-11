@@ -34,6 +34,7 @@ import type {
   UploadStatus,
 } from "@/lib/admin/upload/types";
 import { buildPreviewRows } from "@/lib/admin/upload/validate";
+import { DeleteSourceDialog } from "./delete-source-dialog";
 import { SourceList } from "./source-list";
 import { UploadNotices, UploadStatusCard } from "./status-cards";
 import {
@@ -439,6 +440,7 @@ export function UploadWorkspace({
     total: number;
   } | null>(null);
   const [source, setSource] = useState<ImportSource | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ImportSource | null>(null);
   const [preview, setPreview] = useState<ChunkPreview | null>(null);
   const [errors, setErrors] = useState<ImportErrorRow[]>([]);
   const [errorTotal, setErrorTotal] = useState(0);
@@ -1150,7 +1152,16 @@ export function UploadWorkspace({
         busyId={busySourceId}
         onStatus={handleSourceStatus}
         onDownload={handleDownload}
+        onDelete={setDeleteTarget}
       />
+
+      {deleteTarget ? (
+        <DeleteSourceDialog
+          source={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onChanged={refreshAll}
+        />
+      ) : null}
     </div>
   );
 }

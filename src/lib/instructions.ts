@@ -33,7 +33,11 @@ export const emptyInstructionCounts: InstructionCounts = {
 
 export type ClaimResult =
   | { status: "claimed"; item: InstructionItem }
-  | { status: "empty" }
+  | {
+      status: "empty";
+      /** Skipped rows that are still open for this contributor. */
+      skipped?: number;
+    }
   | { status: "error"; message: string };
 
 /** Everything an action hands back after touching the claim queue. */

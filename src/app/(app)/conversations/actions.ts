@@ -44,6 +44,13 @@ async function requireUserId(): Promise<string> {
   return user.id;
 }
 
+async function skippedItemCount(db: Db, kind: "instruction" | "conversation") {
+  const { data, error } = await db.rpc("skipped_item_count", { p_kind: kind });
+  if (error) return 0;
+  const count = typeof data === "number" ? data : Number(data);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
 async function claimNextConversation(db: Db): Promise<ClaimResult> {
   const { data, error } = await db.rpc("claim_next", { p_kind: "conversation" });
 
@@ -56,7 +63,9 @@ async function claimNextConversation(db: Db): Promise<ClaimResult> {
   }
 
   const rows: unknown[] = Array.isArray(data) ? data : [];
-  if (rows.length === 0) return { status: "empty" };
+  if (rows.length === 0) {
+    return { status: "empty", skipped: await skippedItemCount(db, "conversation") };
+  }
 
   const item = parseConversationRow(rows[0]);
   if (!item) {
@@ -190,7 +199,7 @@ export async function submitConversation(
   };
 }
 
-/** Skip: release the caller's claim, then hand out the next conversation. */
+/** Skip: remember the skip for this user, release the claim, claim the next. */
 export async function skipConversation(itemId: string): Promise<SkipResult> {
   const userId = await requireUserId();
 
@@ -200,19 +209,47 @@ export async function skipConversation(itemId: string): Promise<SkipResult> {
   }
 
   const db = await createClient();
-  const { error } = await db.rpc("release_claim", { p_item_id: parsed.data });
+  const { error } = await db.rpc("skip_item", {
+    p_kind: "conversation",
+    p_item_id: parsed.data,
+  });
   if (error) {
-    logRpcError("[release_claim]", error);
+    logRpcError("[skip_item]", error);
     return {
       status: "error",
-      message: "The conversation could not be released. Try again.",
+      message: "The conversation could not be skipped. Try again.",
     };
   }
+
+  revalidatePath("/conversations");
 
   return {
     status: "skipped",
     workspace: await withCounts(userId, await claimNextConversation(db)),
   };
+}
+
+/** Start over: clear this contributor's conversation skips and claim again. */
+export async function restartConversationQueue(): Promise<WorkspaceData> {
+  const userId = await requireUserId();
+  const db = await createClient();
+
+  const { error } = await db.rpc("clear_skips", { p_kind: "conversation" });
+  if (error) {
+    logRpcError("[clear_skips]", error);
+    return {
+      claim: {
+        status: "error",
+        message: "Skipped conversations could not be restored. Try again.",
+      },
+      counts: null,
+      submitted: null,
+    };
+  }
+
+  revalidatePath("/conversations");
+
+  return withCounts(userId, await claimNextConversation(db));
 }
 
 const reportSchema = z.object({

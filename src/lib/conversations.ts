@@ -34,7 +34,11 @@ export const emptyConversationCounts: ConversationCounts = {
 
 export type ClaimResult =
   | { status: "claimed"; item: ConversationItem }
-  | { status: "empty" }
+  | {
+      status: "empty";
+      /** Skipped rows that are still open for this contributor. */
+      skipped?: number;
+    }
   | { status: "error"; message: string };
 
 /** Everything an action hands back after touching the claim queue. */

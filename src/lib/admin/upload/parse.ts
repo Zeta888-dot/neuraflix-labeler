@@ -1,7 +1,10 @@
 import type {
   ChunkResult,
+  ImportDeletePreview,
+  ImportDeleteResult,
   ImportErrorRow,
   ImportSource,
+  ImportSourceItem,
   ImportStatus,
   UploadMeter,
   UploadQueue,
@@ -86,6 +89,74 @@ export function parseImportSource(value: unknown): ImportSource | null {
     updatedAt: text(row.updated_at),
     completedAt: text(row.completed_at),
     error: text(row.error),
+  };
+}
+
+export function parseImportDeletePreview(
+  value: unknown,
+): ImportDeletePreview | null {
+  const row = record(value);
+  if (!row) return null;
+
+  const sourceId = text(row.source_id);
+  const kind = text(row.kind);
+  const fileName = text(row.file_name);
+  const status = statusValue(row.status);
+  if (!sourceId || !fileName || !status) return null;
+  if (kind !== "instruction" && kind !== "conversation") return null;
+
+  return {
+    sourceId,
+    kind,
+    fileName,
+    fileHash: text(row.file_hash),
+    sourceLabel: text(row.source_label),
+    status,
+    totalItems: numberValue(row.total_items) ?? 0,
+    openItems: numberValue(row.open_items) ?? 0,
+    translatedItems: numberValue(row.translated_items) ?? 0,
+    claimedItems: numberValue(row.claimed_items) ?? 0,
+    reviewedItems: numberValue(row.reviewed_items) ?? 0,
+    exportedItems: numberValue(row.exported_items) ?? 0,
+    safeItems: numberValue(row.safe_items) ?? 0,
+    protectedItems: numberValue(row.protected_items) ?? 0,
+  };
+}
+
+export function parseImportSourceItem(value: unknown): ImportSourceItem | null {
+  const row = record(value);
+  if (!row) return null;
+
+  const itemId = text(row.out_item_id);
+  const status = text(row.out_status);
+  if (!itemId || !status) return null;
+
+  return {
+    itemId,
+    status,
+    preview: text(row.out_preview) ?? "",
+    translationCount: numberValue(row.out_translation_count) ?? 0,
+    claimCount: numberValue(row.out_claim_count) ?? 0,
+    reviewCount: numberValue(row.out_review_count) ?? 0,
+    exportedCount: numberValue(row.out_exported_count) ?? 0,
+    canDelete: boolValue(row.out_can_delete),
+  };
+}
+
+export function parseImportDeleteResult(
+  value: unknown,
+): ImportDeleteResult | null {
+  const row = record(value);
+  if (!row) return null;
+
+  return {
+    deletedItems: numberValue(row.deleted_items) ?? 0,
+    deletedTranslations: numberValue(row.deleted_translations) ?? 0,
+    deletedExported: numberValue(row.deleted_exported) ?? 0,
+    deletedClaims: numberValue(row.deleted_claims) ?? 0,
+    deletedReviews: numberValue(row.deleted_reviews) ?? 0,
+    remainingItems: numberValue(row.remaining_items) ?? 0,
+    sourceRemoved: boolValue(row.source_removed),
   };
 }
 

@@ -10,10 +10,9 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, buttonClasses } from "@/components/ui/button";
-import { Card, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/page";
 import { ReportDialog } from "@/components/ui/report-dialog";
-import { KhowarField } from "@/components/khowar/KhowarField";
 import { cn } from "@/lib/cn";
 import {
   clearInstructionDraft,
@@ -33,10 +32,11 @@ import {
 import {
   claimInstruction,
   reportInstructionIssue,
+  restartInstructionQueue,
   skipInstruction,
   submitInstruction,
 } from "./actions";
-import { EnglishPanel } from "./english-panel";
+import { InstructionParts } from "./english-panel";
 
 type Notice = { tone: "info" | "error"; message: string };
 type Busy = null | "load" | "submit" | "skip" | "report";
@@ -236,7 +236,17 @@ export function InstructionsWorkspace({
 
     clearInstructionDraft(item.id);
     applyWorkspace(result.workspace);
-    setNotice({ tone: "info", message: "Item released. The next item is ready." });
+    setNotice({ tone: "info", message: "Item skipped for you. The next item is ready." });
+  }
+
+  async function restart() {
+    if (busy !== null) return;
+    setBusy("load");
+    setNotice(null);
+    const data = await restartInstructionQueue();
+    setBusy(null);
+    applyWorkspace(data);
+    setNotice({ tone: "info", message: "Skipped items are back in your queue." });
   }
 
   function openReport() {
@@ -303,29 +313,55 @@ export function InstructionsWorkspace({
         </Card>
       ) : claim.status === "empty" ? (
         <div className="mt-4">
-          <EmptyState title="No items are available right now">
-            <p>
-              Every open instruction is claimed by another contributor or
-              already translated. New items appear here once an admin imports
-              them.
-            </p>
-            <Link
-              href="/dashboard"
-              className={buttonClasses({ variant: "secondary", size: "sm" }) + " mt-4"}
-            >
-              Back to the dashboard
-            </Link>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="mt-4 ml-2"
-              onClick={() => void load()}
-              disabled={busy !== null}
-            >
-              <ArrowClockwise size={14} weight="light" aria-hidden="true" />
-              Check again
-            </Button>
-          </EmptyState>
+          {claim.skipped && claim.skipped > 0 ? (
+            <EmptyState title="You have skipped every available item">
+              <p>
+                You skipped {claim.skipped}{" "}
+                {claim.skipped === 1 ? "instruction" : "instructions"}. They are
+                hidden for you until you start over. Items with no translation
+                are never lost, and other contributors can still work on them.
+              </p>
+              <Button
+                size="sm"
+                className="mt-4"
+                onClick={() => void restart()}
+                disabled={busy !== null}
+              >
+                <ArrowClockwise size={14} weight="light" aria-hidden="true" />
+                Start over
+              </Button>
+              <Link
+                href="/dashboard"
+                className={buttonClasses({ variant: "secondary", size: "sm" }) + " mt-4 ml-2"}
+              >
+                Back to the dashboard
+              </Link>
+            </EmptyState>
+          ) : (
+            <EmptyState title="No items are available right now">
+              <p>
+                Every open instruction is claimed by another contributor or
+                already translated. New items appear here once an admin imports
+                them.
+              </p>
+              <Link
+                href="/dashboard"
+                className={buttonClasses({ variant: "secondary", size: "sm" }) + " mt-4"}
+              >
+                Back to the dashboard
+              </Link>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="mt-4 ml-2"
+                onClick={() => void load()}
+                disabled={busy !== null}
+              >
+                <ArrowClockwise size={14} weight="light" aria-hidden="true" />
+                Check again
+              </Button>
+            </EmptyState>
+          )}
         </div>
       ) : claim.status === "error" ? (
         <div className="mt-4">
@@ -358,58 +394,26 @@ export function InstructionsWorkspace({
             }
           }}
         >
-          <div className="flex flex-col gap-4 lg:gap-6">
-            <EnglishPanel item={claim.item} />
-
-            <Card className="flex flex-col gap-5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <CardTitle>Khowar</CardTitle>
-                {draftRestored ? (
-                  <span className="text-caption text-mute">
-                    Draft restored from this browser
-                  </span>
-                ) : null}
-              </div>
-
-              <KhowarField
-                id="khowar_instruction"
-                label="Instruction"
-                rows={4}
-                value={values.khowar_instruction}
-                onChange={(value) => setField("khowar_instruction", value)}
-                error={errors.khowar_instruction}
-                warning={fieldWarnings.khowar_instruction}
-                fieldRef={instructionRef}
-                disabled={busy !== null}
-              />
-
-              {claim.item.english.input ? (
-                <KhowarField
-                  id="khowar_input"
-                  label="Input"
-                  rows={3}
-                  value={values.khowar_input}
-                  onChange={(value) => setField("khowar_input", value)}
-                  error={errors.khowar_input}
-                  warning={fieldWarnings.khowar_input}
-                  fieldRef={inputRef}
-                  disabled={busy !== null}
-                />
-              ) : null}
-
-              <KhowarField
-                id="khowar_response"
-                label="Response"
-                rows={4}
-                value={values.khowar_response}
-                onChange={(value) => setField("khowar_response", value)}
-                error={errors.khowar_response}
-                warning={fieldWarnings.khowar_response}
-                fieldRef={responseRef}
-                disabled={busy !== null}
-              />
-            </Card>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-body-sm text-mute">
+              {claim.item.english.input ? 3 : 2} parts in this instruction
+            </p>
+            {draftRestored ? (
+              <span className="text-caption text-mute">
+                Draft restored from this browser
+              </span>
+            ) : null}
           </div>
+
+          <InstructionParts
+            item={claim.item}
+            values={values}
+            errors={errors}
+            fieldWarnings={fieldWarnings}
+            disabled={busy !== null}
+            fieldRefs={refs}
+            onChange={setField}
+          />
 
           {warnings.length > 0 ? (
             <div className="mt-4 rounded-lg bg-surface p-4 shadow-elev-2">

@@ -1,6 +1,6 @@
 # Handoff
 
-Status: L0 to L7a are implemented. L8a (admin instruction import), L8a-ux (labeling, translation layout and photo straightening), L8b (conversation import) and the review reject and reopen work are in the working tree, uncommitted. `0009_hardening.sql`, `0010_import_text.sql`, `0011_review_reopen.sql` and `0012_import_conversations.sql` are written but are not applied by this repo.
+Status: L0 to L7a are implemented. L8a (admin instruction import), L8a-ux (labeling, translation layout and photo straightening), L8b (conversation import) and the review reject and reopen work are in the working tree, uncommitted. `0009_hardening.sql`, `0010_import_text.sql`, `0011_review_reopen.sql` and `0012_import_conversations.sql` are written but are not applied by this repo. `0013_skip_items.sql` is written and needs to be applied before Skip works as described below. `0014_import_delete.sql` is written and needs 0013 applied first.
 
 ## How to run
 
@@ -18,8 +18,9 @@ Environment variable names only: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABA
 3. Migration: `0007_review.sql` is confirmed applied. Apply `0008_admin_settings.sql` if it is not applied yet. Then paste `supabase/migrations/0009_hardening.sql` into the Supabase SQL editor and Run. It is safe to run again. Nothing in this repo applies it.
 4. Apply `supabase/migrations/0010_import_text.sql` for the admin text import if it is not applied yet. It is safe to run again and is not applied by this repo.
 5. Apply `supabase/migrations/0011_review_reopen.sql` for the reject reasons and the admin reopen RPC, then `supabase/migrations/0012_import_conversations.sql` for the conversation import. Run 0012 after 0010. Both are safe to run again and neither is applied by this repo.
-6. `0009` adds the submission rate limits, the plain text trigger, `health_ping()` and its grants. Until it is applied, `/api/health` returns 503 and the new limits are not enforced.
-7. The first admin already exists. Later role changes use Admin, Users, or SQL:
+6. Apply `supabase/migrations/0013_skip_items.sql` for Skip memory, then `supabase/migrations/0014_import_delete.sql` for admin deletion of imported items. Run them in that order, after 0012. Both are safe to run again and neither is applied by this repo.
+7. `0009` adds the submission rate limits, the plain text trigger, `health_ping()` and its grants. Until it is applied, `/api/health` returns 503 and the new limits are not enforced.
+8. The first admin already exists. Later role changes use Admin, Users, or SQL:
 
 ```sql
 update public.profiles p set role = 'reviewer'
@@ -70,6 +71,57 @@ Manual check: import a small instruction file, then open Instructions from the s
 - `test-conversations.jsonl` has 2 valid rows, 1 `messages` alias row, 1 duplicate and 9 invalid rows. Conversation validation and the SQL guarantees are covered in `validate.test.ts` and `sql-security.test.ts`.
 
 Manual check: on Admin, Upload data, choose Conversations, select `test-conversations.jsonl` and load the chunk. Expect 3 loaded, 1 duplicate skipped and 9 invalid. Open Conversations and confirm the 3 open items. Reselect the same file and confirm nothing loads twice. Then check the same file as an instruction import is rejected or skipped row by row, not silently mixed.
+
+## Admin delete for imported data (0014)
+
+- `0014_import_delete.sql` adds `import_deletions` (audit), `admin_import_delete_preview`, `admin_import_source_items`, `admin_delete_import_source` and `admin_delete_import_item`. Every RPC is security definer, pins `search_path`, checks `auth.uid()` and `is_admin()`, is closed to public and anon and is granted to authenticated only.
+- Safe by default: only `open` items with no translations, no claims and no review records are deleted. Items with any labeler work are counted as protected and stay. The preview returns total, open, translated, claimed, reviewed, exported, safe and protected counts before anything is removed.
+- To include work, the admin ticks the extra box and types `DELETE` or the exact file name. The database rejects a mismatch with `DELETE_CONFIRM_REQUIRED`. The item list marks each row safe or protected with its translation, claim, review and exported counts; protected rows can only be deleted through the same confirmation.
+- Deletion removes claims, review records and skips for the affected item ids explicitly. Translations go through the existing item foreign key cascade. The source record is removed only when no items remain, so the same file can be uploaded again; otherwise `loaded_rows` is reset to the remaining count. No OCR page, line or Storage object is touched.
+- UI: the Recent uploads list has `Delete items` on instruction and conversation sources. It opens a dialog with the counts, the extra confirm box, the per-item list and a summary after each delete. After any delete the upload status and the source list refresh.
+- Regression test: `src/lib/admin/upload/delete-security.test.ts` guards the security definer settings, admin checks, safe filter, protected path, child cleanup, source removal rule, audit table and grants.
+
+Manual check: apply 0013 then 0014. On Admin, Upload data, open `Delete items` on a small test source. Confirm the counts match the rows. Delete one safe item and watch the list refresh. Try to delete a protected row without the extra box and confirm it is disabled. Then tick the box, type a wrong value and confirm the delete stays blocked, type DELETE and confirm the row and its translations, claims and review records are gone. Delete the rest and confirm the source disappears so the same file can be imported again. Confirm OCR pages and images are unchanged.
+
+## Skip fix (0013)
+
+- Root cause: `skipInstruction` and `skipConversation` called `release_claim`, then `claim_next` picked the same oldest open row again. The client state updated, but with the same item id, so the screen looked unchanged.
+- `0013_skip_items.sql` adds `public.skips` (kind, item_id, contributor_id), closed to direct writes. `skip_item(kind, item_id)` records the skip and releases the caller's claim. `clear_skips(kind)` is Start over. `skipped_item_count(kind)` feeds the empty state.
+- `claim_next` is re-created from 0003 with the caller's skips excluded in both renewal paths, both pick paths and both claim-cleanup deletes. Conversations get the same fix.
+- The Skip action now calls `skip_item` and revalidates the page route. Both workspaces pass the skipped count back on an empty claim. If it is above zero, the empty state says every available item was skipped and offers Start over. Otherwise the existing empty state and Check again remain.
+- Regression test: `src/lib/skip-queue.test.ts` guards the skips table, per-caller scoping in `claim_next`, Start over scope and the grants.
+- `0013` is not applied by this repo. Apply it before testing Skip.
+
+Manual check: on Instructions press Skip twice and confirm each press shows a different instruction. Skip every open item and confirm the Start over empty state appears, then press Start over and confirm items return. Repeat on Conversations.
+
+## Instructions layout matches Conversations
+
+- New shared `src/components/translation/translation-pair.tsx`: one `section` card with the badge row and copy button, the read-only English text in a `bg-surface-2` block, then the Khowar field below. Same styling, spacing, field sizing and mobile stack as Conversations.
+- `conversation-turn.tsx` now renders the shared pair card. The Instructions screen renders one pair card per part (Instruction, optional Input, Response) through `InstructionParts` in `english-panel.tsx`.
+- The Instructions form now starts with the same count row as Conversations ("3 parts in this instruction") and the same draft restored note on the right. Source stays as a caption under the cards. Submit, Skip, Report, Ctrl + Enter, validation, warnings and drafts are unchanged.
+- The old English card and separate Khowar card are gone. Nothing else in the data flow changed.
+
+Manual check: open Instructions and compare it with Conversations. Confirm each part is its own card with English above its Khowar field, the same card padding and field size, and the same action bar at desktop and 360px. Submit one item and confirm the next item loads.
+
+## Navigation feedback and skeletons
+
+- `NavigationProgress` is a thin top bar that appears 120 ms after a same-origin link click and clears on the pathname change, with a 15 s safety reset. It respects reduced motion and adds no dependency.
+- Each sidebar link renders `NavPending` through `useLinkStatus`, a fixed-size dot that fades in while that link's navigation is pending.
+- `src/components/ui/skeleton.tsx` holds plain Tailwind skeletons (`animate-pulse` plus `motion-reduce:animate-none`). Every requested route has a `loading.tsx`: Dashboard, Instructions, Conversations, Plain text, OCR pages, Review, Admin, Admin Upload, Guidelines and Account.
+- Dashboard and Account now render `PageHeader` immediately and stream the session-dependent body through Suspense with a matching fallback. Instructions, Conversations, Plain text, OCR, Review, Admin and Admin Upload already had page-level Suspense and keep it.
+- `getSessionUser`, `getProfile`, `requireSessionUser` and `requireAppUser` are wrapped in React `cache`, so the layout and the page share one auth and one profile read per request instead of repeating both.
+- `src/lib/supabase/session.ts` now reads the access token expiry from the auth cookie locally. Proxy makes no Supabase call when the token is valid for more than 60 seconds. Missing, unreadable or near-expiry tokens still go through `getClaims()` so refresh keeps working.
+- Verification change to note: Proxy no longer verifies the JWT signature on every request. The server layout still calls `getClaims()`, which verifies it, and RLS is the real data boundary. Proxy protection stays optimistic.
+
+Remaining slow spots that were not fixed:
+
+- The app layout still blocks the first document render on `requireAppUser`, because the sidebar needs the role. `instant = false` remains on `src/app/(app)/layout.tsx`. Client navigations between pages do not rerun it, and they now get the skeleton and progress bar.
+- Supabase projects on the legacy HS256 signing key make `getClaims()` fall back to `getUser()`, a network call per request. Switching the project to asymmetric JWT signing keys would remove it. Not changed here.
+- Vercel and Supabase may run in different regions. Setting the deployment region close to the database is the main remaining latency lever.
+- The dashboard and admin pages issue many small count queries in parallel. They could become one aggregate RPC, but that needs a migration and was out of scope for this part.
+- `app_settings` is read only on Admin and is left uncached so quota changes apply immediately. Per-user data is never cached across users.
+
+Manual check: click through every sidebar item and watch the top bar and the dot on the clicked link. On a throttled connection confirm the skeleton matches each page and the title and sidebar are already visible. Check reduced motion turns the pulse off. Confirm a valid session still refreshes after it expires.
 
 ## Review reject and reopen
 

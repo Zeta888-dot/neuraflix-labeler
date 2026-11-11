@@ -7,12 +7,18 @@ import { canImport } from "@/lib/admin/upload/access";
 import { buildErrorCsv } from "@/lib/admin/upload/csv";
 import {
   parseChunkResult,
+  parseImportDeletePreview,
+  parseImportDeleteResult,
   parseImportSource,
+  parseImportSourceItem,
 } from "@/lib/admin/upload/parse";
 import type {
   ChunkResult,
+  ImportDeletePreview,
+  ImportDeleteResult,
   ImportErrorRow,
   ImportSource,
+  ImportSourceItem,
   UploadStatus,
 } from "@/lib/admin/upload/types";
 import {
@@ -45,7 +51,7 @@ function safeErrorCode(error: {
   code?: string | null;
 }): string | null {
   const message = typeof error.message === "string" ? error.message : "";
-  const marker = message.match(/\b(?:IMPORT|ADMIN)_[A-Z0-9_]+\b/);
+  const marker = message.match(/\b(?:IMPORT|ADMIN|DELETE)_[A-Z0-9_]+\b/);
   if (marker) return marker[0];
 
   if (typeof error.code === "string" && /^[0-9A-Z]{5}$/.test(error.code)) {
@@ -109,6 +115,18 @@ function actionError(error: { message?: string; code?: string | null }): string 
   }
   if (message.includes("IMPORT_SOURCE_NOT_FOUND")) {
     return "This import could not be found. Reload the page.";
+  }
+  if (message.includes("IMPORT_ITEM_NOT_FOUND")) {
+    return "This item was already deleted. Reload the page.";
+  }
+  if (message.includes("IMPORT_ITEM_NOT_IMPORTED")) {
+    return "Only imported items can be deleted here.";
+  }
+  if (message.includes("IMPORT_ITEM_PROTECTED")) {
+    return "This item has labeler work. Tick the extra delete and confirm to remove it.";
+  }
+  if (message.includes("DELETE_CONFIRM_REQUIRED")) {
+    return "Type DELETE or the exact file name to confirm.";
   }
   if (message.includes("IMPORT_INVALID_")) {
     return "The import request was not valid. Reload the page and try again.";
@@ -415,4 +433,195 @@ export async function downloadErrorCsvAction(
     csv: buildErrorCsv(rows),
     fileName: `${safe}-errors.csv`,
   };
+}
+
+/* ---------------------------------------------------------------------------
+ * Imported data deletion. Safe by default; the database re-checks is_admin()
+ * and refuses anything with labeler work unless includeWork is set with a
+ * matching confirm text.
+ * ------------------------------------------------------------------------- */
+
+const deleteSourceIdSchema = z.object({
+  sourceId: z.uuid(),
+});
+
+export async function getImportDeletePreviewAction(
+  input: z.infer<typeof deleteSourceIdSchema>,
+): Promise<
+  | { status: "ok"; preview: ImportDeletePreview }
+  | { status: "error"; message: string }
+> {
+  const adminId = await requireAdminId();
+  if (!adminId) return { status: "error", message: FORBIDDEN_MESSAGE };
+
+  const parsed = deleteSourceIdSchema.safeParse(input);
+  if (!parsed.success) {
+    return { status: "error", message: "The import was not valid. Reload the page." };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("admin_import_delete_preview", {
+    p_source_id: parsed.data.sourceId,
+  });
+
+  if (error) {
+    logRpcError("[admin_import_delete_preview]", error);
+    return { status: "error", message: actionError(error) };
+  }
+
+  const preview = parseImportDeletePreview(data);
+  if (!preview) {
+    logRpcError("[admin_import_delete_preview]", {
+      message: "Unexpected admin_import_delete_preview payload",
+      code: "UPLOAD_PARSE",
+    });
+    return { status: "error", message: genericMessage("UPLOAD_PARSE") };
+  }
+
+  return { status: "ok", preview };
+}
+
+const sourceItemsSchema = z.object({
+  sourceId: z.uuid(),
+  offset: z.number().int().min(0).max(1_000_000).default(0),
+  limit: z.number().int().min(1).max(200).default(50),
+});
+
+export type ImportSourceItemsInput = z.infer<typeof sourceItemsSchema>;
+
+export async function getImportSourceItemsAction(
+  input: ImportSourceItemsInput,
+): Promise<
+  | { status: "ok"; rows: ImportSourceItem[] }
+  | { status: "error"; message: string }
+> {
+  const adminId = await requireAdminId();
+  if (!adminId) return { status: "error", message: FORBIDDEN_MESSAGE };
+
+  const parsed = sourceItemsSchema.safeParse(input);
+  if (!parsed.success) {
+    return { status: "error", message: "The item query was not valid." };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("admin_import_source_items", {
+    p_source_id: parsed.data.sourceId,
+    p_limit: parsed.data.limit,
+    p_offset: parsed.data.offset,
+  });
+
+  if (error) {
+    logRpcError("[admin_import_source_items]", error);
+    return { status: "error", message: actionError(error) };
+  }
+
+  const rows = Array.isArray(data)
+    ? data
+        .map(parseImportSourceItem)
+        .filter((row): row is ImportSourceItem => row !== null)
+    : [];
+
+  return { status: "ok", rows };
+}
+
+const deleteSourceSchema = z.object({
+  sourceId: z.uuid(),
+  includeWork: z.boolean().default(false),
+  confirm: z.string().max(255).default(""),
+});
+
+export type DeleteImportSourceInput = z.infer<typeof deleteSourceSchema>;
+
+function revalidateAfterDelete(): void {
+  revalidatePath("/admin/upload");
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+  revalidatePath("/instructions");
+  revalidatePath("/conversations");
+}
+
+export async function deleteImportSourceAction(
+  input: DeleteImportSourceInput,
+): Promise<
+  { status: "ok"; result: ImportDeleteResult } | { status: "error"; message: string }
+> {
+  const adminId = await requireAdminId();
+  if (!adminId) return { status: "error", message: FORBIDDEN_MESSAGE };
+
+  const parsed = deleteSourceSchema.safeParse(input);
+  if (!parsed.success) {
+    return { status: "error", message: "The delete request was not valid." };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("admin_delete_import_source", {
+    p_source_id: parsed.data.sourceId,
+    p_include_work: parsed.data.includeWork,
+    p_confirm: parsed.data.confirm,
+  });
+
+  if (error) {
+    logRpcError("[admin_delete_import_source]", error);
+    return { status: "error", message: actionError(error) };
+  }
+
+  const result = parseImportDeleteResult(data);
+  if (!result) {
+    logRpcError("[admin_delete_import_source]", {
+      message: "Unexpected admin_delete_import_source payload",
+      code: "UPLOAD_PARSE",
+    });
+    return { status: "error", message: genericMessage("UPLOAD_PARSE") };
+  }
+
+  revalidateAfterDelete();
+  return { status: "ok", result };
+}
+
+const deleteItemSchema = z.object({
+  kind: z.enum(["instruction", "conversation"]),
+  itemId: z.uuid(),
+  includeWork: z.boolean().default(false),
+  confirm: z.string().max(255).default(""),
+});
+
+export type DeleteImportItemInput = z.infer<typeof deleteItemSchema>;
+
+export async function deleteImportItemAction(
+  input: DeleteImportItemInput,
+): Promise<
+  { status: "ok"; result: ImportDeleteResult } | { status: "error"; message: string }
+> {
+  const adminId = await requireAdminId();
+  if (!adminId) return { status: "error", message: FORBIDDEN_MESSAGE };
+
+  const parsed = deleteItemSchema.safeParse(input);
+  if (!parsed.success) {
+    return { status: "error", message: "The delete request was not valid." };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("admin_delete_import_item", {
+    p_kind: parsed.data.kind,
+    p_item_id: parsed.data.itemId,
+    p_include_work: parsed.data.includeWork,
+    p_confirm: parsed.data.confirm,
+  });
+
+  if (error) {
+    logRpcError("[admin_delete_import_item]", error);
+    return { status: "error", message: actionError(error) };
+  }
+
+  const result = parseImportDeleteResult(data);
+  if (!result) {
+    logRpcError("[admin_delete_import_item]", {
+      message: "Unexpected admin_delete_import_item payload",
+      code: "UPLOAD_PARSE",
+    });
+    return { status: "error", message: genericMessage("UPLOAD_PARSE") };
+  }
+
+  revalidateAfterDelete();
+  return { status: "ok", result };
 }

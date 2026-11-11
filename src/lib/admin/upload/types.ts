@@ -72,6 +72,44 @@ export type ImportSource = {
   error: string | null;
 };
 
+export type ImportDeletePreview = {
+  sourceId: string;
+  kind: ImportKind;
+  fileName: string;
+  fileHash: string | null;
+  sourceLabel: string | null;
+  status: ImportStatus;
+  totalItems: number;
+  openItems: number;
+  translatedItems: number;
+  claimedItems: number;
+  reviewedItems: number;
+  exportedItems: number;
+  safeItems: number;
+  protectedItems: number;
+};
+
+export type ImportSourceItem = {
+  itemId: string;
+  status: string;
+  preview: string;
+  translationCount: number;
+  claimCount: number;
+  reviewCount: number;
+  exportedCount: number;
+  canDelete: boolean;
+};
+
+export type ImportDeleteResult = {
+  deletedItems: number;
+  deletedTranslations: number;
+  deletedExported: number;
+  deletedClaims: number;
+  deletedReviews: number;
+  remainingItems: number;
+  sourceRemoved: boolean;
+};
+
 export type ImportErrorRow = {
   rowIndex: number;
   reason: string;

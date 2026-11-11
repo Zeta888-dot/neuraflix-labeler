@@ -40,6 +40,7 @@ import {
 import {
   claimConversation,
   reportConversationIssue,
+  restartConversationQueue,
   skipConversation,
   submitConversation,
 } from "./actions";
@@ -277,8 +278,18 @@ export function ConversationsWorkspace({
     applyWorkspace(result.workspace);
     setNotice({
       tone: "info",
-      message: "Conversation released. The next one is ready.",
+      message: "Conversation skipped for you. The next one is ready.",
     });
+  }
+
+  async function restart() {
+    if (busy !== null) return;
+    setBusy("load");
+    setNotice(null);
+    const data = await restartConversationQueue();
+    setBusy(null);
+    applyWorkspace(data);
+    setNotice({ tone: "info", message: "Skipped conversations are back in your queue." });
   }
 
   function openReport() {
@@ -370,29 +381,55 @@ export function ConversationsWorkspace({
         </Card>
       ) : claim.status === "empty" ? (
         <div className="mt-4">
-          <EmptyState title="No conversations are available right now">
-            <p>
-              Every open conversation is claimed by another contributor or
-              already translated. New conversations appear here once an admin
-              imports them.
-            </p>
-            <Link
-              href="/dashboard"
-              className={buttonClasses({ variant: "secondary", size: "sm" }) + " mt-4"}
-            >
-              Back to the dashboard
-            </Link>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="mt-4 ml-2"
-              onClick={() => void load()}
-              disabled={busy !== null}
-            >
-              <ArrowClockwise size={14} weight="light" aria-hidden="true" />
-              Check again
-            </Button>
-          </EmptyState>
+          {claim.skipped && claim.skipped > 0 ? (
+            <EmptyState title="You have skipped every available conversation">
+              <p>
+                You skipped {claim.skipped}{" "}
+                {claim.skipped === 1 ? "conversation" : "conversations"}. They
+                are hidden for you until you start over. Other contributors can
+                still work on them.
+              </p>
+              <Button
+                size="sm"
+                className="mt-4"
+                onClick={() => void restart()}
+                disabled={busy !== null}
+              >
+                <ArrowClockwise size={14} weight="light" aria-hidden="true" />
+                Start over
+              </Button>
+              <Link
+                href="/dashboard"
+                className={buttonClasses({ variant: "secondary", size: "sm" }) + " mt-4 ml-2"}
+              >
+                Back to the dashboard
+              </Link>
+            </EmptyState>
+          ) : (
+            <EmptyState title="No conversations are available right now">
+              <p>
+                Every open conversation is claimed by another contributor or
+                already translated. New conversations appear here once an admin
+                imports them.
+              </p>
+              <Link
+                href="/dashboard"
+                className={buttonClasses({ variant: "secondary", size: "sm" }) + " mt-4"}
+              >
+                Back to the dashboard
+              </Link>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="mt-4 ml-2"
+                onClick={() => void load()}
+                disabled={busy !== null}
+              >
+                <ArrowClockwise size={14} weight="light" aria-hidden="true" />
+                Check again
+              </Button>
+            </EmptyState>
+          )}
         </div>
       ) : claim.status === "error" ? (
         <div className="mt-4">

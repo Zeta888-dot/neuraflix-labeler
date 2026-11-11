@@ -42,11 +42,13 @@ export function SourceList({
   busyId,
   onStatus,
   onDownload,
+  onDelete,
 }: {
   sources: ImportSource[];
   busyId: string | null;
   onStatus: (source: ImportSource, status: "paused" | "active") => void;
   onDownload: (source: ImportSource) => void;
+  onDelete: (source: ImportSource) => void;
 }) {
   return (
     <Card>
@@ -175,6 +177,18 @@ export function SourceList({
                       onClick={() => onDownload(source)}
                     >
                       Download errors
+                    </Button>
+                  ) : null}
+
+                  {source.kind === "instruction" ||
+                  source.kind === "conversation" ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => onDelete(source)}
+                    >
+                      Delete items
                     </Button>
                   ) : null}
                 </div>

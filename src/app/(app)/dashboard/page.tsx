@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
 import { Badge } from "@/components/ui/badge";
 import { buttonClasses } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { EmptyState, PageHeader } from "@/components/ui/page";
+import { SkeletonCard } from "@/components/ui/skeleton";
 import { requireAppUser } from "@/lib/auth";
 import { getConversationCounts } from "@/lib/conversations-server";
 import { getInstructionCounts } from "@/lib/instructions-server";
@@ -27,7 +29,21 @@ const TEXT_STATUSES = ["submitted", "approved", "rejected"] as const;
 type StatusKey = (typeof STATUSES)[number];
 type Counts = Partial<Record<StatusKey, number>>;
 
-export default async function DashboardPage() {
+export default function DashboardPage() {
+  return (
+    <>
+      <PageHeader
+        title="Dashboard"
+        description="Your own contribution counts, nothing else. No leaderboard, no project-wide numbers."
+      />
+      <Suspense fallback={<DashboardBodySkeleton />}>
+        <DashboardBody />
+      </Suspense>
+    </>
+  );
+}
+
+async function DashboardBody() {
   const { user } = await requireAppUser();
   const [
     instructionCounts,
@@ -65,11 +81,6 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <PageHeader
-        title="Dashboard"
-        description="Your own contribution counts, nothing else. No leaderboard, no project-wide numbers."
-      />
-
       {!instructionCounts &&
       !conversationCounts &&
       !plainTextCounts &&
@@ -159,6 +170,16 @@ export default async function DashboardPage() {
         </div>
       )}
     </>
+  );
+}
+
+function DashboardBodySkeleton() {
+  return (
+    <div className="mt-6 flex flex-col gap-4" aria-hidden="true">
+      {Array.from({ length: 5 }, (_, index) => (
+        <SkeletonCard key={index} lines={2} />
+      ))}
+    </div>
   );
 }
 
